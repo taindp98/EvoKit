@@ -1,0 +1,49 @@
+# EvoKit Configuration: EoH Strategy on Online Bin Packing
+experiment:
+  study_name: "eoh_bpp_online"
+  max_generations: 5
+  candidates_per_generation: 2
+  evaluate_test_split: true
+  test_top_k: 1
+  seed_evaluation: true
+
+storage:
+  db_path: "./artifacts/eoh_bpp/experiments.db"
+  artifacts_dir: "./artifacts/eoh_bpp/code"
+  direction: "MINIMIZE"
+
+gateway:
+  provider: "vllm"
+  base_url: "http://172.22.4.1:8000/v1"
+  model: "mistralai/Devstral-Small-2-24B-Instruct-2512"
+  temperature: 0.8
+  max_tokens: 2048
+  timeout: 120.0
+
+benchmark:
+  type: "bpp_online"
+  capacity: 100.0
+  num_train_instances: 5
+  num_test_instances: 10
+  train_items_per_instance: 200
+  test_items_per_instance: 500
+  seed: 42
+
+population:
+  type: "lineage_archive"
+  capacity: 10
+  tournament_size: 2
+  direction: "MINIMIZE"
+
+mutation:
+  type: "eoh"
+  temperature: 0.8
+  operator_weights:
+    e1: 0.25
+    e2: 0.25
+    m1: 0.25
+    m2: 0.25
+
+evaluator:
+  type: "subprocess_sandbox"
+  timeout_seconds: 30.0

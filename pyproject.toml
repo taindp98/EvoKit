@@ -1,0 +1,43 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "evokit"
+version = "0.0.1"
+description = "Production-grade modular framework for LLM-guided evolutionary algorithm design"
+readme = "README.md"
+authors = [
+    { name = "EvoKit Contributors" }
+]
+requires-python = ">=3.10"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "pydantic>=2.0.0",
+    "pyyaml>=6.0",
+    "httpx>=0.24.0",
+    "numpy>=1.20.0",
+    "rich>=12.0.0"
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.0.0",
+    "pytest-cov>=4.0.0"
+]
+dashboard = [
+    "optuna>=3.0.0",
+    "optuna-dashboard>=0.10.0"
+]
+
+[project.scripts]
+evokit = "evokit.main:cli"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["evokit*"]

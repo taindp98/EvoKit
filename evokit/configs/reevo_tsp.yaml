@@ -1,0 +1,45 @@
+# EvoKit Configuration: ReEvo Reflective Strategy on TSP Constructive
+experiment:
+  study_name: "reevo_tsp_construct"
+  max_generations: 5
+  candidates_per_generation: 2
+  evaluate_test_split: true
+  test_top_k: 1
+  seed_evaluation: true
+
+storage:
+  db_path: "./artifacts/reevo_tsp/experiments.db"
+  artifacts_dir: "./artifacts/reevo_tsp/code"
+  direction: "MINIMIZE"
+
+gateway:
+  provider: "vllm"
+  base_url: "http://172.22.4.1:8000/v1"
+  model: "mistralai/Devstral-Small-2-24B-Instruct-2512"
+  temperature: 0.7
+  max_tokens: 2048
+  timeout: 120.0
+
+benchmark:
+  type: "tsp_construct"
+  train_cities: 30
+  test_cities: 50
+  num_train_instances: 5
+  num_test_instances: 10
+  seed: 42
+
+population:
+  type: "reflection_buffer"
+  capacity: 10
+  max_failure_history: 15
+  max_reflection_memory: 10
+  direction: "MINIMIZE"
+
+mutation:
+  type: "reevo"
+  temperature: 0.7
+  enable_reflection_loop: true
+
+evaluator:
+  type: "subprocess_sandbox"
+  timeout_seconds: 30.0

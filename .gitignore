@@ -1,0 +1,48 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Distribution / packaging
+dist/
+build/
+*.egg-info/
+*.egg
+
+# Virtual environments
+venv/
+.venv/
+env/
+
+# Environment variables & API keys
+.env
+.env.local
+*.env
+!.env.example
+
+# Testing & Type Checking
+.pytest_cache/
+.coverage
+htmlcov/
+.mypy_cache/
+.ruff_cache/
+
+# Experiment Logs, Databases & Traces
+logs/
+*.log
+*.db
+*.sqlite
+*.sqlite3
+
+# Wandb & Profiling
+wandb/
+.wandb/
+
+# LLM cache & Sandbox temporary files
+.llm_cache/
+tmp/
+*.tmp
+*.swp
+*~
+.DS_Store
+examples

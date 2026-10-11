@@ -1,0 +1,46 @@
+# EvoKit Configuration: MAP-Elites with Diff Mutation on BPP Online
+experiment:
+  study_name: "map_elites_bpp"
+  max_generations: 5
+  candidates_per_generation: 2
+  evaluate_test_split: true
+  test_top_k: 1
+  seed_evaluation: true
+
+storage:
+  db_path: "./artifacts/map_elites_bpp/experiments.db"
+  artifacts_dir: "./artifacts/map_elites_bpp/code"
+  direction: "MINIMIZE"
+
+gateway:
+  provider: "vllm"
+  base_url: "http://172.22.4.1:8000/v1"
+  model: "mistralai/Devstral-Small-2-24B-Instruct-2512"
+  temperature: 0.8
+  max_tokens: 2048
+  timeout: 120.0
+
+benchmark:
+  type: "bpp_online"
+  capacity: 100.0
+  num_train_instances: 5
+  num_test_instances: 10
+  train_items_per_instance: 200
+  test_items_per_instance: 500
+  seed: 42
+
+population:
+  type: "map_elites"
+  grid_dim_1: 5
+  grid_dim_2: 5
+  max_complexity: 1000
+  max_metric_val: 1.0
+  direction: "MINIMIZE"
+
+mutation:
+  type: "diff"
+  temperature: 0.8
+
+evaluator:
+  type: "subprocess_sandbox"
+  timeout_seconds: 30.0

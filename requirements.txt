@@ -1,0 +1,17 @@
+# EvoKit Core Dependencies
+pydantic>=2.0.0
+pyyaml>=6.0
+httpx>=0.24.0
+numpy>=1.20.0
+rich>=12.0.0
+
+# Optional: Real-time Visualization & Optuna Dashboard
+optuna>=3.0.0
+optuna-dashboard>=0.10.0
+
+# Optional: Testing & Development
+pytest>=7.0.0
+pytest-cov>=4.0.0
+
+# Optional: Local LLM GPU Inference Server (install on GPU host)
+# pip install vllm

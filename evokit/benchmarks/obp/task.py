@@ -106,27 +106,42 @@ class OBPBenchmarkTask(BaseBenchmarkTask):
             })
 
     def simulate(self, priority_fn, instance: Dict[str, Any]) -> int:
-        """Simulate packing for a single instance using the priority heuristic."""
-        cap = instance["capacity"]
+        """Simulate online bin packing for a single instance, faithful to LLM4AD
+        (`online_bin_packing/evaluation.py::online_binpack`).
+
+        Key fidelity point: all bins are pre-allocated at full capacity (one per
+        item), so empty bins are ALWAYS among the candidates the heuristic scores.
+        The heuristic therefore controls the real decision — place the item in a
+        partially-filled bin or open a fresh one — which is what actually drives
+        the bin count. (The previous implementation only created a new bin when
+        nothing fit, hiding empty bins from the heuristic and leaving it almost no
+        control over the objective, which flattened convergence.)
+
+        A bin is "used" iff its remaining capacity differs from the initial
+        capacity; the returned count is that number.
+        """
+        cap = float(instance["capacity"])
         items = instance["items"]
-        bins: List[float] = []
+        n = len(items)
+        # One potential bin per item, all initially empty (remaining == capacity).
+        bins = np.full(n, cap, dtype=float)
 
         for item in items:
-            valid_indices = [idx for idx, rem in enumerate(bins) if rem >= item]
-            if valid_indices:
-                candidate_rem = np.array([bins[idx] for idx in valid_indices], dtype=float)
-                priorities = priority_fn(float(item), candidate_rem)
-                priorities = np.asarray(priorities, dtype=float).flatten()
-                if len(priorities) != len(valid_indices):
-                    raise ValueError(
-                        f"Expected {len(valid_indices)} priority values, but got {len(priorities)}"
-                    )
-                best_choice = valid_indices[int(np.argmax(priorities))]
-                bins[best_choice] -= item
-            else:
-                bins.append(cap - item)
+            item = float(item)
+            valid_indices = np.nonzero(bins - item >= 0)[0]
+            if valid_indices.size == 0:
+                # Should not happen (n bins guarantees room), but stay robust.
+                continue
+            priorities = priority_fn(item, bins[valid_indices])
+            priorities = np.asarray(priorities, dtype=float).flatten()
+            if len(priorities) != len(valid_indices):
+                raise ValueError(
+                    f"Expected {len(valid_indices)} priority values, but got {len(priorities)}"
+                )
+            best_bin = int(valid_indices[int(np.argmax(priorities))])
+            bins[best_bin] -= item
 
-        return len(bins)
+        return int(np.count_nonzero(bins != cap))
 
     def evaluate_code(self, code_str: str, split: str = "train", timeout: float = 30.0) -> MetricRecord:
         if not self._is_setup:

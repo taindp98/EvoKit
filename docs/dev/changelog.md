@@ -333,3 +333,14 @@ This document tracks implementation progress across all development phases of **
   - The global best-so-far incumbent is now tracked OUTSIDE the active population (mirroring ReEvo's separate `elitist`), and surfaced via `get_elites`, so best-so-far is never lost under non-elitist replacement.
   - Example config documents the option (default non_elitist).
 - **Verification:** 27/27 tests pass; unit check confirms non-elitist generational replacement (worse offspring replace better parents, incumbent preserved) vs elitist (worse offspring rejected, better displaces worst).
+
+### Phase 27: OBP Simulation Fidelity & Extraction Hardening (slow-convergence root cause)
+- [x] **Task 27.1**: Diagnose slow objective convergence (flat fitness curves)
+  - Found the search objective was nearly insensitive to the heuristic: almost every valid candidate scored the exact Best-Fit baseline (2091.64), so EoH/ReEvo/OpenEvolve all plateaued.
+  - Root cause: `OBPBenchmarkTask.simulate()` started with an empty bin list and opened a new bin ONLY when nothing fit, so the priority function never saw empty bins and could not choose to open one — stripping away the heuristic's main lever over bin count.
+- [x] **Task 27.2**: Fix `simulate()` to match LLM4AD (`online_bin_packing/evaluation.py`)
+  - Pre-allocate `num_items` bins at full capacity; pass ALL fitting bins (including empty ones) to the heuristic each step; `argmax` picks; used bins = `(bins != capacity).sum()`.
+  - Verified the objective is now heuristic-sensitive: Best-Fit 215 / First-Fit 216 / Worst-Fit 500 bins on a test instance (previously all collapsed together). Best-Fit baseline unchanged (2091.64 @ 4.06%), so prior comparisons stay anchored.
+- [x] **Task 27.3**: Harden `extract_code` against leaked prose
+  - `_sanitize_code` is now parse-guided: valid code returned untouched; on parse failure, drop leaked `{thought}`/brace-wrapped and bare-English-prose lines and keep the edit only if it restores parseability. Fixes candidates that were wrongly marked invalid by rationale prose leaking into the function body.
+- **Verification:** 27/27 tests pass.

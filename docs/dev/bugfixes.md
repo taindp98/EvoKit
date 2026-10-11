@@ -124,6 +124,28 @@ search — `OpenEvolveMutationStrategy` selected the parent and inspirations glo
 
 ---
 
+### OBP objective insensitive to the heuristic → flat convergence (Phase 27)
+**Symptom:** EoH/ReEvo/OpenEvolve objective curves barely moved; almost every valid candidate
+scored the exact Best-Fit baseline (2091.64) regardless of how different its code looked.
+**Root cause:** `OBPBenchmarkTask.simulate()` began with an empty bin list and opened a new bin
+only when no open bin could fit the item, so the `priority` function was never shown empty bins
+and could never decide to open one. The heuristic's only influence was tie-ordering among
+already-fitting bins — almost no leverage over the bin count — so the fitness landscape was flat.
+**Fix:** rewrote `simulate()` to match LLM4AD (`online_bin_packing/evaluation.py`): pre-allocate
+`num_items` bins at full capacity, pass all fitting bins (including empties) to the heuristic each
+step, count used bins as `(bins != capacity).sum()`. Objective is now heuristic-sensitive
+(Best-Fit 215 / First-Fit 216 / Worst-Fit 500 on a test instance); Best-Fit baseline unchanged.
+
+### Prose leaking into code bodies (Phase 27)
+**Symptom:** some candidates were marked invalid with `name 'thought' is not defined` or syntax
+errors because the LLM dropped its rationale (a `{thought}` placeholder or bare English prose)
+inside the function body.
+**Fix:** `BaseMutationStrategy._sanitize_code` is now parse-guided — valid code is returned
+untouched; only when the code fails to parse are leaked placeholder/prose lines removed, and the
+edit is kept only if it restores parseability.
+
+---
+
 ## Known issues / open
 
 - **LLM output extraction is fragile.** `extract_thought` grabs the first `{...}`, which can

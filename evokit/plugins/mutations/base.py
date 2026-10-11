@@ -73,24 +73,62 @@ class BaseMutationStrategy(BaseComponent):
     def _sanitize_code(code: str) -> str:
         """Strip artifacts an LLM sometimes leaks into a code block.
 
-        Most common failure (seen with ReEvo/EoH prompts that ask for a
-        ``{thought}`` rationale): the model drops the literal ``{thought}``
-        placeholder — or a brace-wrapped prose sentence — on its own line
-        *inside* the function body, producing ``name 'thought' is not defined``
-        or a syntax error. We remove any standalone line that is just a
-        ``{...}`` placeholder / brace-wrapped prose, preserving real dict or set
-        literals (which contain ``:``/``,`` or are short inline expressions).
+        LLMs asked for a ``{thought}`` rationale (ReEvo/EoH/OpenEvolve prompts)
+        occasionally drop that reasoning *inside* the function body — a literal
+        ``{thought}`` placeholder, a brace-wrapped sentence, or bare English prose
+        after the ``def`` line / an unterminated docstring — which yields
+        ``name 'thought' is not defined`` or a syntax error, needlessly marking an
+        otherwise-good heuristic invalid.
+
+        This is parse-guided and conservative: if the code already parses, it is
+        returned untouched (zero risk to valid code). Only when it fails to parse
+        do we drop obvious leaked lines (brace-wrapped placeholders/prose, and
+        prose sentences sitting at statement position) and keep the edit *only* if
+        it makes the code parse.
         """
-        out = []
+        code = code.strip()
+        if BaseMutationStrategy._parses(code):
+            return code
+
+        kept = []
         for line in code.splitlines():
-            stripped = line.strip()
-            if stripped.startswith("{") and stripped.endswith("}") and len(stripped) > 2:
-                inner = stripped[1:-1]
-                # Heuristic: a leaked rationale placeholder is a bare word or a
-                # sentence of words/spaces (no ':' ',' '=' that a real literal has).
-                if not any(ch in inner for ch in ":,=\"'") and (
-                    inner == "thought" or " " in inner or inner.isidentifier()
-                ):
-                    continue  # drop the leaked placeholder/prose line
-            out.append(line)
-        return "\n".join(out).strip()
+            if BaseMutationStrategy._is_leaked_line(line):
+                continue
+            kept.append(line)
+        repaired = "\n".join(kept).strip()
+        # Keep the repair only if it actually fixed parseability; else leave the
+        # original so a genuine bug surfaces as an honest evaluation failure.
+        if repaired and BaseMutationStrategy._parses(repaired):
+            return repaired
+        return code
+
+    @staticmethod
+    def _parses(code: str) -> bool:
+        import ast
+        try:
+            ast.parse(code)
+            return True
+        except Exception:
+            return False
+
+    @staticmethod
+    def _is_leaked_line(line: str) -> bool:
+        """True for a line that looks like leaked rationale/prose, not real code."""
+        s = line.strip()
+        if not s:
+            return False
+        # Brace-wrapped placeholder or prose: {thought}, {some idea ...}
+        if s.startswith("{") and s.endswith("}") and len(s) > 2:
+            inner = s[1:-1]
+            if not any(ch in inner for ch in ":,=\"'"):
+                return True
+        # Bare English prose at statement position: starts with a capitalized word,
+        # contains spaces, has no Python operators/brackets/keywords that real code
+        # lines carry, and isn't a comment/string/decorator.
+        if s[0].isalpha() and s[0].isupper() and " " in s:
+            if not any(ch in s for ch in "=()[]{}:#\"'") and not s.endswith(":"):
+                words = s.split()
+                # e.g. "The core idea is to balance two goals" / "Calculate priority scores..."
+                if len(words) >= 3 and all(w.replace(",", "").replace(".", "").isalpha() for w in words):
+                    return True
+        return False

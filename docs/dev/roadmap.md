@@ -51,6 +51,11 @@ _Last updated: 2026-10-11._
 - [x] Restructured README + `docs/tutorials/` (community) and `docs/dev/` (milestones) sub-guides; per-package READMEs.
 - [x] 27/27 unit + integration tests passing.
 
+### Fidelity audits (plugins vs. original implementations)
+- [x] **ReEvo** vs `references/reevo/reevo.py`: code-sanitizer + pinned signature, long-term reflection memory, distinct-objective pairing, elitist-mutation operator, `filter_code`, and configurable non-elitist/elitist survival (default non-elitist). See [bugfixes.md](bugfixes.md).
+- [x] **EoH** vs `references/LLM4AD/llm4ad/method/eoh`: all-operators-per-step cycling + `selection_num` parents for E1/E2.
+- [x] **OpenEvolve** vs `references/openevolve`: island-scoped (current_island) uniform mixed-strategy selection, island-only inspirations, faithful copy/flag/skip-duplicate migration; strategy delegates selection to the archive via `EvolutionContext.metadata["population_manager"]`.
+
 ---
 
 ## 🔭 To do
@@ -69,7 +74,8 @@ _Last updated: 2026-10-11._
 
 ### Engine & fidelity
 - [ ] Function-evaluation budget mode (`max_fe`) alongside generation-count, matching ReEvo/OpenEvolve budgeting.
-- [ ] Optional island-scoped per-offspring parent routing for OpenEvolve (currently fitness-weighted over the full view).
+- [x] ~~Island-scoped per-offspring parent routing for OpenEvolve~~ — done (Phase 25); strategy delegates to the archive's island-scoped sampling.
+- [ ] Per-island generation counters for OpenEvolve migration trigger (currently uses the engine's global generation; see [bugfixes.md](bugfixes.md) known approximations).
 - [ ] Resume / checkpoint a run from its SQLite DB + artifacts.
 - [ ] Async / streaming evaluation to overlap LLM generation with sandbox execution.
 

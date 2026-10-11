@@ -137,7 +137,14 @@ class EvolutionEngine(BaseComponent):
                 task_spec=self.benchmark.get_context_spec(),
                 runtime_config=self.engine_cfg.model_dump(),
                 llm_gateway=self.gateway,
-                metadata={"time_elapsed": time.time() - start_time},
+                metadata={
+                    "time_elapsed": time.time() - start_time,
+                    # Optional handle to the live population manager, for strategies
+                    # that need manager-specific selection (e.g. OpenEvolve's
+                    # island-scoped parent/inspiration sampling). Most strategies
+                    # just use population_view and ignore this.
+                    "population_manager": self.population,
+                },
             )
 
             # 2. Search & Mutation: Generate un-evaluated candidates

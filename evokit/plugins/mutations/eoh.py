@@ -19,6 +19,11 @@ class EoHConfig(MutationConfig):
     operator_weights: Dict[str, float] = Field(
         default_factory=lambda: {"e1": 0.25, "e2": 0.25, "m1": 0.25, "m2": 0.25}
     )
+    selection_num: int = Field(default=5, description="Number of parents passed to E1/E2 crossover prompts (reference EoH 'selection_num')")
+    use_e2_operator: bool = Field(default=True, description="Enable the E2 (backbone synthesis) operator")
+    use_m1_operator: bool = Field(default=True, description="Enable the M1 (form mutation) operator")
+    use_m2_operator: bool = Field(default=True, description="Enable the M2 (parameter mutation) operator")
+    cycle_operators: bool = Field(default=True, description="Reference EoH behavior: cycle through all enabled operators across a generation (round-robin) instead of weighted-random single-operator selection")
 
 
 class EoHMutationStrategy(BaseMutationStrategy):
@@ -37,6 +42,18 @@ class EoHMutationStrategy(BaseMutationStrategy):
             cfg = EoHConfig()
         super().__init__(cfg)
         self.eoh_cfg: EoHConfig = cfg
+
+    def _enabled_operators(self) -> List[str]:
+        """Operators active this run. Reference EoH always uses E1 and toggles
+        E2/M1/M2 (no M3)."""
+        ops = ["e1"]
+        if self.eoh_cfg.use_e2_operator:
+            ops.append("e2")
+        if self.eoh_cfg.use_m1_operator:
+            ops.append("m1")
+        if self.eoh_cfg.use_m2_operator:
+            ops.append("m2")
+        return ops
 
     def _select_operator(self, has_parents: bool) -> str:
         if not has_parents:
@@ -141,15 +158,27 @@ Task: Refine scoring coefficients, thresholds, normalization constants, and edge
         if num_candidates <= 0:
             return []
 
-        # 1. Plan operators and construct prompts for all candidates
+        # 1. Plan operators and construct prompts for all candidates.
+        #    Reference EoH applies ALL enabled operators each step; we reproduce
+        #    that by cycling e1/e2/m1/m2 round-robin across the generation
+        #    (cycle_operators=True), so offspring are evenly distributed across
+        #    operators rather than drawn from a weighted-random single choice.
+        has_parents = len(pop_pool) > 0
+        enabled = self._enabled_operators()
+        sel_num = max(1, self.eoh_cfg.selection_num)
         plan = []
-        for _ in range(num_candidates):
-            has_parents = len(pop_pool) > 0
-            op = self._select_operator(has_parents)
+        for idx in range(num_candidates):
+            if not has_parents:
+                op = "i1"
+            elif self.eoh_cfg.cycle_operators:
+                op = enabled[idx % len(enabled)]
+            else:
+                op = self._select_operator(has_parents)
 
             parents: List[Individual] = []
             if op in ("e1", "e2"):
-                parents = random.sample(pop_pool, min(2, len(pop_pool)))
+                # E1/E2 crossover prompts take selection_num parents (reference).
+                parents = random.sample(pop_pool, min(sel_num, len(pop_pool)))
             elif op in ("m1", "m2"):
                 parents = random.sample(pop_pool, 1)
 

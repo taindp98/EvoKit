@@ -18,6 +18,7 @@ from evokit.plugins.mutations.base import BaseMutationStrategy, MutationConfig
 
 class ReEvoConfig(MutationConfig):
     enable_reflection_loop: bool = Field(default=True, description="Perform separate LLM reflection step before generation")
+    mutation_rate: float = Field(default=0.5, description="Fraction of offspring produced by elitist mutation (rest via reflective crossover), matching ReEvo")
 
 
 class ReEvoMutationStrategy(BaseMutationStrategy):
@@ -37,6 +38,54 @@ class ReEvoMutationStrategy(BaseMutationStrategy):
             cfg = ReEvoConfig()
         super().__init__(cfg)
         self.reevo_cfg: ReEvoConfig = cfg
+        # ReEvo long-term reflection memory: accumulated verbal "insights" carried
+        # across generations (the strategy instance persists for the whole run).
+        # This is the mechanism that lets ReEvo build on prior reasoning rather
+        # than doing isolated pairwise rewrites.
+        self.long_term_reflection: str = ""
+
+    def _update_long_term_reflection(self, short_reflections: List[str], context: EvolutionContext) -> None:
+        """Synthesize accumulated insights from prior + new short-term reflections
+        (ReEvo's long-term reflection step). Stored on the instance for reuse."""
+        gateway = context.llm_gateway
+        new = "\n".join(r for r in short_reflections if r)
+        if not new:
+            return
+        if gateway is None:
+            # No LLM: just append (bounded) so the signal still carries forward.
+            self.long_term_reflection = (self.long_term_reflection + "\n" + new).strip()[-2000:]
+            return
+        prompt = f"""You are maintaining a long-term list of transferable insights for designing better heuristics.
+
+Problem:
+{context.task_spec.get('description', '')}
+
+Prior accumulated insights:
+{self.long_term_reflection or '(none yet)'}
+
+New observations from the latest generation:
+{new}
+
+Task: Update the list of durable, generalizable design principles (not specifics of one program). Return a concise bulleted list, under 200 words."""
+        try:
+            resp = gateway.generate(prompt=prompt, temperature=self.cfg.temperature, max_tokens=512)
+            self.long_term_reflection = resp.content.strip()
+        except Exception:
+            self.long_term_reflection = (self.long_term_reflection + "\n" + new).strip()[-2000:]
+
+    @staticmethod
+    def _filter_code(code: str) -> str:
+        """Strip signature/import lines from a program body (ReEvo `filter_code`),
+        so parent snippets shown in prompts are just the logic to reason about."""
+        out = []
+        for line in (code or "").split("\n"):
+            s = line.lstrip()
+            if s.startswith(("def ", "import ", "from ")):
+                continue
+            out.append(line)
+            if s.startswith("return"):
+                break
+        return "\n".join(out).strip("\n")
 
     def _reflect(self, better: Individual, worse: Individual, context: EvolutionContext) -> str:
         gateway = context.llm_gateway
@@ -49,13 +98,13 @@ class ReEvoMutationStrategy(BaseMutationStrategy):
 Algorithm A (Higher Performing, Fitness: {better.fitness}):
 Idea: {better.thought or 'N/A'}
 ```python
-{better.code}
+{self._filter_code(better.code)}
 ```
 
 Algorithm B (Lower Performing, Fitness: {worse.fitness}):
 Idea: {worse.thought or 'N/A'}
 ```python
-{worse.code}
+{self._filter_code(worse.code)}
 ```
 
 Task:
@@ -92,13 +141,19 @@ High-Performing Baseline:
 {better.code}
 ```
 
-Synthesized Reflection & Guidance:
+Accumulated Long-Term Insights (from prior generations):
+{self.long_term_reflection or '(none yet)'}
+
+Synthesized Reflection & Guidance (this pair):
 {reflection}
 
 Task:
 Synthesize an improved Python heuristic algorithm that acts on the guidance in the reflection.
-1. Enclose your core algorithmic thought in curly braces: {{thought}}
-2. Output the full executable Python code in a single ```python ... ``` code block.
+
+Strict requirements:
+1. Keep the EXACT function name and signature shown in the Function Interface — do not add, remove, or rename parameters.
+2. Write your reasoning on ONE line BEFORE the code block, wrapped in curly braces, e.g. {{your idea here}}. Do NOT put braces or prose inside the function body.
+3. Output the full, self-contained, executable Python function in a single ```python ... ``` code block (include the `import numpy as np` if used).
 """
         if gateway is not None:
             resp = gateway.generate(prompt=prompt, temperature=self.cfg.temperature, max_tokens=self.cfg.max_tokens)
@@ -122,20 +177,34 @@ Synthesize an improved Python heuristic algorithm that acts on the guidance in t
             metadata={"reflection": reflection},
         )
 
-    def _mutate_single(self, context: EvolutionContext, pop_pool: List[Individual]) -> Individual:
-        if len(pop_pool) >= 2:
-            p1, p2 = random.sample(pop_pool, 2)
-            f1 = p1.fitness if p1.fitness is not None else float("inf")
-            f2 = p2.fitness if p2.fitness is not None else float("inf")
-            better, worse = (p1, p2) if f1 <= f2 else (p2, p1)
+    @staticmethod
+    def _select_distinct_pair(pop_pool: List[Individual]) -> Optional[tuple]:
+        """ReEvo random_select: pick two valid parents with DISTINCT objectives
+        (reflecting between equal-scoring programs is meaningless). Returns
+        (better, worse) or None if no distinct-objective pair exists."""
+        valid = [p for p in pop_pool if p.fitness is not None]
+        if len(valid) < 2:
+            return None
+        for _ in range(1000):
+            a, b = random.sample(valid, 2)
+            if a.fitness != b.fitness:
+                better, worse = (a, b) if a.fitness <= b.fitness else (b, a)
+                return better, worse
+        return None
 
+    def _mutate_single(self, context: EvolutionContext, pop_pool: List[Individual]) -> Individual:
+        """Reflective CROSSOVER: short-term reflection on a distinct-objective pair,
+        then reflection-guided offspring."""
+        pair = self._select_distinct_pair(pop_pool)
+        if pair is not None:
+            better, worse = pair
             reflection = (
                 self._reflect(better, worse, context)
                 if self.reevo_cfg.enable_reflection_loop
                 else "Analyze differential performance and advance search."
             )
             return self._generate_offspring(better, worse, reflection, context)
-        elif len(pop_pool) == 1:
+        elif pop_pool:
             better = pop_pool[0]
             reflection = "Refine the existing baseline by exploring alternative decision boundaries."
             return self._generate_offspring(better, None, reflection, context)
@@ -148,24 +217,101 @@ Synthesize an improved Python heuristic algorithm that acts on the guidance in t
                 operator="reevo_seed",
             )
 
+    def _elitist(self, pop_pool: List[Individual], task_spec: Dict[str, Any]) -> Optional[Individual]:
+        valid = [p for p in pop_pool if p.fitness is not None]
+        if not valid:
+            return None
+        maximize = str(task_spec.get("direction", "MINIMIZE")).upper() == "MAXIMIZE"
+        return (max if maximize else min)(valid, key=lambda p: p.fitness)
+
+    def _mutate_elitist(self, context: EvolutionContext, pop_pool: List[Individual]) -> Individual:
+        """ReEvo elitist mutation: mutate the single best individual, guided by the
+        accumulated long-term reflection (not a pairwise reflection)."""
+        elitist = self._elitist(pop_pool, context.task_spec)
+        if elitist is None:
+            return self._mutate_single(context, pop_pool)
+        gateway = context.llm_gateway
+        task_spec = context.task_spec
+        prompt = f"""Problem Context:
+{task_spec.get('description', '')}
+
+Function Interface:
+```python
+{task_spec.get('signature', '')}
+    \"\"\"{task_spec.get('docstring', '')}\"\"\"
+```
+
+Current Elitist (best so far, Fitness: {elitist.fitness}):
+```python
+{self._filter_code(elitist.code)}
+```
+
+Accumulated Long-Term Insights (from prior generations):
+{self.long_term_reflection or '(none yet)'}
+
+Task:
+Write a mutated version of the elitist that applies the long-term insights to explore a
+genuinely different strategy.
+
+Strict requirements:
+1. Keep the EXACT function name and signature shown in the Function Interface — do not add, remove, or rename parameters.
+2. Write your reasoning on ONE line BEFORE the code block, wrapped in curly braces, e.g. {{your idea here}}. Do NOT put braces or prose inside the function body.
+3. Output the full, self-contained, executable Python function in a single ```python ... ``` code block.
+"""
+        if gateway is not None:
+            raw_text = gateway.generate(prompt=prompt, temperature=self.cfg.temperature, max_tokens=self.cfg.max_tokens).content
+        else:
+            raw_text = task_spec.get("initial_code", "def solve(): pass")
+        thought = self.extract_thought(raw_text)
+        code = self.extract_code(raw_text, default_fallback=elitist.code or task_spec.get("initial_code", ""))
+        return Individual(
+            code=code,
+            thought=thought or "ReEvo elitist mutation",
+            parent_ids=[elitist.id],
+            generation=context.generation,
+            operator="reevo_mutate",
+            metadata={"reflection": self.long_term_reflection},
+        )
+
+    def _run_parallel(self, fn, n: int) -> List[Individual]:
+        if n <= 0:
+            return []
+        if n == 1:
+            return [fn()]
+        results: List[Optional[Individual]] = [None] * n
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(n, 8)) as executor:
+            fut = {executor.submit(fn): i for i in range(n)}
+            for f in concurrent.futures.as_completed(fut):
+                results[fut[f]] = f.result()
+        return [r for r in results if r is not None]
+
     def mutate(self, context: EvolutionContext, num_candidates: int = 1) -> List[Individual]:
+        """One ReEvo iteration, faithful to references/reevo/reevo.py::evolve:
+        reflective CROSSOVER on distinct-objective pairs -> fold short-term
+        reflections into the long-term reflection -> elitist MUTATION guided by
+        that long-term reflection. `mutation_rate` splits the offspring budget."""
         if num_candidates <= 0:
             return []
         pop_pool = context.population_view if isinstance(context.population_view, list) else []
+        serial = (context.llm_gateway is None)
 
-        if num_candidates == 1 or context.llm_gateway is None:
-            return [self._mutate_single(context, pop_pool) for _ in range(num_candidates)]
+        # Split the budget: mutation_rate fraction to elitist mutation, rest crossover.
+        n_mutate = int(round(num_candidates * self.reevo_cfg.mutation_rate)) if pop_pool else 0
+        n_cross = num_candidates - n_mutate
 
-        # Parallelize across candidates
-        pool_size = min(num_candidates, 8)
-        results: List[Optional[Individual]] = [None] * num_candidates
-        with concurrent.futures.ThreadPoolExecutor(max_workers=pool_size) as executor:
-            future_to_idx = {
-                executor.submit(self._mutate_single, context, pop_pool): i
-                for i in range(num_candidates)
-            }
-            for future in concurrent.futures.as_completed(future_to_idx):
-                idx = future_to_idx[future]
-                results[idx] = future.result()
+        # 1. Reflective crossover offspring (distinct-objective pairs).
+        cross = ([self._mutate_single(context, pop_pool) for _ in range(n_cross)]
+                 if serial else self._run_parallel(lambda: self._mutate_single(context, pop_pool), n_cross))
 
-        return [r for r in results if r is not None]
+        # 2. Long-term reflection: fold this generation's short-term reflections in,
+        #    so the elitist mutation below (and next gen) build on accumulated insight.
+        if self.reevo_cfg.enable_reflection_loop and cross:
+            short = [c.metadata.get("reflection", "") for c in cross
+                     if isinstance(c.metadata, dict) and c.metadata.get("reflection")]
+            self._update_long_term_reflection(short, context)
+
+        # 3. Elitist mutation offspring, guided by the (updated) long-term reflection.
+        mut = ([self._mutate_elitist(context, pop_pool) for _ in range(n_mutate)]
+               if serial else self._run_parallel(lambda: self._mutate_elitist(context, pop_pool), n_mutate))
+
+        return cross + mut

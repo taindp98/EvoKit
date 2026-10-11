@@ -60,11 +60,37 @@ class BaseMutationStrategy(BaseComponent):
         matches = re.findall(pattern, text, re.DOTALL | re.IGNORECASE)
         if matches:
             # Pick longest code block
-            return max(matches, key=len).strip()
+            return BaseMutationStrategy._sanitize_code(max(matches, key=len).strip())
 
         # Try to find def ... or import ... up to the end
         match = re.search(r"(?:import |from |def |class ).*", text, re.DOTALL)
         if match:
-            return match.group(0).strip()
+            return BaseMutationStrategy._sanitize_code(match.group(0).strip())
 
         return default_fallback.strip()
+
+    @staticmethod
+    def _sanitize_code(code: str) -> str:
+        """Strip artifacts an LLM sometimes leaks into a code block.
+
+        Most common failure (seen with ReEvo/EoH prompts that ask for a
+        ``{thought}`` rationale): the model drops the literal ``{thought}``
+        placeholder — or a brace-wrapped prose sentence — on its own line
+        *inside* the function body, producing ``name 'thought' is not defined``
+        or a syntax error. We remove any standalone line that is just a
+        ``{...}`` placeholder / brace-wrapped prose, preserving real dict or set
+        literals (which contain ``:``/``,`` or are short inline expressions).
+        """
+        out = []
+        for line in code.splitlines():
+            stripped = line.strip()
+            if stripped.startswith("{") and stripped.endswith("}") and len(stripped) > 2:
+                inner = stripped[1:-1]
+                # Heuristic: a leaked rationale placeholder is a bare word or a
+                # sentence of words/spaces (no ':' ',' '=' that a real literal has).
+                if not any(ch in inner for ch in ":,=\"'") and (
+                    inner == "thought" or " " in inner or inner.isidentifier()
+                ):
+                    continue  # drop the leaked placeholder/prose line
+            out.append(line)
+        return "\n".join(out).strip()

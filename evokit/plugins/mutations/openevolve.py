@@ -211,12 +211,24 @@ Instructions:
         if not pool:
             return self._cold_start(context, num_candidates)
 
+        # Delegate island-scoped selection to the OpenEvolveArchive when the engine
+        # provides it (so the island model actually shapes parents/inspirations).
+        # Fall back to the flat population_view only if no manager is available.
+        manager = context.metadata.get("population_manager")
+        use_archive = hasattr(manager, "advance_island") and hasattr(manager, "sample_inspirations")
+
         # Plan one (parent, inspirations) per offspring, then batch the LLM calls.
         plan = []
         for _ in range(num_candidates):
-            parent = self._fitness_weighted(pool, minimize)
-            inspirations = self._inspirations(parent, pool, self.oe_cfg.num_inspirations, minimize)
-            top = self._top_programs(pool, self.oe_cfg.num_top_programs, minimize)
+            if use_archive:
+                manager.advance_island()                       # OpenEvolve next_island()
+                parent = manager.sample_parents(k=1)[0]
+                inspirations = manager.sample_inspirations(parent, n=self.oe_cfg.num_inspirations)
+                top = manager.get_top(self.oe_cfg.num_top_programs)
+            else:
+                parent = self._fitness_weighted(pool, minimize)
+                inspirations = self._inspirations(parent, pool, self.oe_cfg.num_inspirations, minimize)
+                top = self._top_programs(pool, self.oe_cfg.num_top_programs, minimize)
             messages = self._build_messages(parent, inspirations, top, task_spec)
             plan.append((parent, messages))
 

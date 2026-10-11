@@ -74,7 +74,8 @@ class OpenEvolveArchive(BasePopulationManager):
         self._feature_stats: Dict[str, Dict[str, Any]] = {}
         self._diversity_refs: List[str] = []
         self._diversity_ref_size = 20
-        self._rr_island = 0          # round-robin island assignment counter
+        self._rr_island = 0          # round-robin island assignment counter (for add)
+        self.current_island = 0      # OpenEvolve current_island for sampling rotation
         self._generation = 0
 
     # ---- direction-normalised fitness ("higher is better") ----------------
@@ -277,47 +278,59 @@ class OpenEvolveArchive(BasePopulationManager):
             return []
         return [self._sample_one() for _ in range(k)]
 
-    def _sample_one(self) -> Individual:
-        # Scope to a round-robin island (mirrors offspring island assignment).
-        island_idx = self._rr_island % self.oe_cfg.num_islands
+    def advance_island(self) -> None:
+        """Rotate the current island (OpenEvolve `next_island`), so successive
+        offspring are produced on successive islands (round-robin)."""
+        self.current_island = (self.current_island + 1) % self.oe_cfg.num_islands
+
+    def _island_best(self, island_idx: int) -> Optional[Individual]:
         pool = [self._programs[pid] for pid in self.islands[island_idx] if pid in self._programs]
         if not pool:
-            pool = list(self._programs.values())
+            return None
+        return max(pool, key=self._elite_fitness)
+
+    def _sample_one(self) -> Individual:
+        """OpenEvolve mixed-strategy parent selection, scoped to current_island.
+        exploration = uniform from current island; exploitation = uniform from
+        archive (preferring current-island members); random = uniform over all.
+        All UNIFORM (reference uses random.choice, not fitness-weighting)."""
+        island = self.current_island
+        island_pool = [self._programs[pid] for pid in self.islands[island] if pid in self._programs]
         r = random.random()
         if r < self.oe_cfg.exploration_ratio:
-            return self._weighted_sample(pool)
+            return random.choice(island_pool) if island_pool else self._any_program()
         if r < self.oe_cfg.exploration_ratio + self.oe_cfg.exploitation_ratio:
-            return self._sample_exploitation(pool)
-        return random.choice(pool)
+            return self._sample_exploitation(island)
+        return self._any_program()
 
-    def _weighted_sample(self, pool: List[Individual]) -> Individual:
-        if len(pool) == 1:
-            return pool[0]
-        weights = [max(self._elite_fitness(p) if math.isfinite(self._elite_fitness(p)) else 0.0, 0.001)
-                   for p in pool]
-        total = sum(weights)
-        weights = [w / total for w in weights] if total > 0 else [1.0 / len(pool)] * len(pool)
-        return random.choices(pool, weights=weights, k=1)[0]
+    def _any_program(self) -> Individual:
+        return random.choice(list(self._programs.values()))
 
-    def _sample_exploitation(self, fallback_pool: List[Individual]) -> Individual:
-        progs = [self._programs[pid] for pid in self._archive if pid in self._programs]
-        return self._weighted_sample(progs) if progs else self._weighted_sample(fallback_pool)
+    def _sample_exploitation(self, island: int) -> Individual:
+        valid = [pid for pid in self._archive if pid in self._programs]
+        if not valid:
+            pool = [self._programs[pid] for pid in self.islands[island] if pid in self._programs]
+            return random.choice(pool) if pool else self._any_program()
+        in_island = [pid for pid in valid if self._programs[pid].__dict__.get("island_idx") == island]
+        return self._programs[random.choice(in_island or valid)]
 
-    def sample_inspirations(self, parent: Individual, n: int = 2) -> List[Individual]:
+    def sample_inspirations(self, parent: Individual, n: int = 2, island_idx: Optional[int] = None) -> List[Individual]:
+        """Inspirations ONLY from the parent's island (+ that island's best),
+        preserving genetic isolation (OpenEvolve `_sample_inspirations`)."""
+        if island_idx is None:
+            island_idx = getattr(parent, "island_idx", self.current_island)
+        island_idx %= self.oe_cfg.num_islands
+        island_progs = [self._programs[pid] for pid in self.islands[island_idx] if pid in self._programs]
+        if not island_progs:
+            return []
         inspirations: List[Individual] = []
-        best = self.get_best()
-        if best and best.id != parent.id:
+        best = self._island_best(island_idx)
+        if best is not None and best.id != parent.id:
             inspirations.append(best)
-        top_n = max(1, int(n * self.oe_cfg.elite_selection_ratio))
-        for prog in self.get_top(top_n):
-            if prog.id != parent.id and prog.id not in {i.id for i in inspirations}:
-                inspirations.append(prog)
-        if len(inspirations) < n:
-            exclude = {parent.id} | {i.id for i in inspirations}
-            cands = [p for p in self._programs.values()
-                     if p.id not in exclude and math.isfinite(self._elite_fitness(p))]
-            if cands:
-                inspirations.extend(random.sample(cands, min(n - len(inspirations), len(cands))))
+        pool = [p for p in island_progs
+                if p.id != parent.id and p.id not in {i.id for i in inspirations}]
+        if pool:
+            inspirations.extend(random.sample(pool, min(n - len(inspirations), len(pool))))
         return inspirations[:n]
 
     # ---- ring migration ---------------------------------------------------
@@ -334,6 +347,9 @@ class OpenEvolveArchive(BasePopulationManager):
         self._migrate()
 
     def _migrate(self) -> None:
+        """Ring migration (OpenEvolve `migrate_programs`): top migration_rate of
+        each island migrate a COPY (new id, `migrant` flag so it won't re-migrate)
+        to the two adjacent islands, skipping targets that already hold the code."""
         with self._lock:
             for i in range(self.oe_cfg.num_islands):
                 pids = [pid for pid in self.islands[i] if pid in self._programs]
@@ -344,8 +360,26 @@ class OpenEvolveArchive(BasePopulationManager):
                 num = max(1, int(len(progs) * self.oe_cfg.migration_rate))
                 targets = [(i + 1) % self.oe_cfg.num_islands, (i - 1) % self.oe_cfg.num_islands]
                 for migrant in progs[:num]:
-                    if migrant.metadata.get("_migrant"):
+                    if migrant.metadata.get("migrant"):
                         continue
                     for t in targets:
-                        self.islands[t].add(migrant.id)
-                    migrant.metadata["_migrant"] = True
+                        self._migrate_one(migrant, t)
+
+    def _migrate_one(self, migrant: Individual, target: int) -> None:
+        target_progs = [self._programs[pid] for pid in self.islands[target] if pid in self._programs]
+        if any(p.code == migrant.code for p in target_progs):
+            return  # duplicate code already in target island
+        copy = migrant.clone(new_id=True)
+        copy.metadata = {**migrant.metadata, "migrant": True}
+        copy.island_idx = target
+        copy.parent_ids = [migrant.id]
+        self._programs[copy.id] = copy
+        self.islands[target].add(copy.id)
+        # Register the copy into the target island's MAP-Elites grid.
+        coords = self._feature_coords(copy)
+        key = str(coords)
+        fm = self.island_feature_maps[target]
+        if key not in fm or self._elite_fitness(copy) > self._elite_fitness(
+            self._programs.get(fm[key], copy)
+        ):
+            fm[key] = copy.id

@@ -44,6 +44,86 @@ non-None. The invariant engine no longer knows any per-benchmark metric.
 
 ---
 
+### ReEvo poor convergence on OBP (Phase 23)
+**Symptom:** on OBP, ReEvo barely improved over 10 generations (2 of 3 seeds flat at the
+Best-Fit baseline), while EoH improved on all seeds under identical settings.
+**Root causes & fixes:**
+- **Malformed-code failures (~50–70% invalid).** Two sub-causes:
+  (a) the LLM dropped the literal `{thought}` placeholder / brace-wrapped prose *inside* the
+  function body → `name 'thought' is not defined` / syntax errors; fixed by
+  `BaseMutationStrategy._sanitize_code()` (strips leaked placeholder/prose lines while
+  preserving real dict/set literals) — benefits all strategies.
+  (b) the LLM changed the `priority(...)` signature (added params) → "missing argument" /
+  "Expected 2 priority values"; fixed by pinning the exact signature and forbidding
+  body-braces in the ReEvo offspring prompt.
+- **Missing long-term reflection memory.** The strategy generated a fresh pairwise reflection
+  per candidate but never accumulated ReEvo's cross-generational "long-term insights", so it
+  behaved like isolated rewrites. Fixed: the (persistent) strategy now maintains a
+  `long_term_reflection`, folds each generation's short-term reflections into it, and feeds the
+  accumulated insights into subsequent offspring prompts.
+
+**Second-pass fidelity audit vs `references/reevo/reevo.py`** found three more deviations, all fixed:
+- **Non-distinct parent pairing.** EvoKit paired any two parents; the reference's `random_select`
+  requires two parents with *distinct* objectives (reflecting between equal-scoring programs is
+  meaningless, and common when a strong baseline dominates). Fixed with `_select_distinct_pair`.
+- **No separate elitist-mutation operator.** The reference's loop is reflective **crossover** on
+  pairs *then* **elitist mutation** (mutate the single best, guided by the long-term reflection),
+  producing `pop_size * mutation_rate` offspring. EvoKit only did crossover. Added
+  `_mutate_elitist` + `reevo_mutate` operator; `mutate()` now splits the budget by `mutation_rate`
+  and runs crossover → long-term-reflect → elitist-mutate in one call, matching `evolve()`.
+- **No `filter_code`.** The reference strips signature/import lines from parent snippets shown in
+  prompts. Added `_filter_code`, applied to parent code in the reflection and mutation prompts.
+
+---
+
+### EoH fidelity audit vs `llm4ad/method/eoh` (Phase 24)
+**Fixed:**
+- **Operator application.** Reference EoH applies *all* enabled operators (E1→E2→M1→M2) each
+  step; EvoKit picked one operator at random by weight. Added `cycle_operators` (default on):
+  offspring cycle round-robin through the enabled operators across a generation.
+- **E1/E2 parent count.** Reference uses `selection_num` parents for E1/E2; EvoKit hardcoded 2.
+  Added `EoHConfig.selection_num` (default 5); M1/M2 keep 1 parent.
+
+**Known approximations (not changed):**
+- **Parent selection distribution.** Reference `population.selection()` is rank-based
+  (`p ∝ 1/(rank+N)`); EvoKit samples uniformly from the `population_view` the engine supplies,
+  which is already a tournament-selected pool (`parent_selection_num`). Close but not identical.
+- **Score-based dedup.** Reference marks any function sharing an existing score as `-inf`
+  (aggressive novelty-by-score). EvoKit's `LineageGraphArchive` does not.
+- **Prompt wording.** Behaviorally equivalent (boxed-`{}` thought + function template) but not
+  byte-identical to the reference templates.
+
+---
+
+### OpenEvolve island model bypassed (Phase 25)
+**Symptom (fidelity):** the island model existed in the Pillar-1 archive but did not affect
+search — `OpenEvolveMutationStrategy` selected the parent and inspirations globally
+(fitness-weighted) from the flat `population_view`, ignoring islands entirely.
+**Root causes & fixes (vs `references/openevolve/openevolve/database.py`):**
+- **Global vs island-scoped selection.** Now the strategy delegates to the archive, which does
+  `current_island` rotation (`advance_island` = reference `next_island`) and island-scoped
+  mixed-strategy parent sampling.
+- **Fitness-weighted vs uniform.** Reference uses `random.choice` (uniform) for exploration
+  (current island), exploitation (archive, preferring current island), and random (all). EvoKit
+  was fitness-weighting; switched to uniform to match.
+- **Global vs island-only inspirations.** Reference `_sample_inspirations` draws ONLY from the
+  parent's island plus that island's best. EvoKit used the global top/best; fixed.
+- **Migration semantics.** Reference migrates a COPY (new id, `migrant` flag, skip-duplicate-code
+  in target, register into target MAP-Elites). EvoKit previously just added the original's id to
+  the neighbor island set; fixed to copy+flag+skip-duplicate.
+- Engine now exposes the live population manager via `EvolutionContext.metadata["population_manager"]`
+  so a strategy can opt into manager-specific selection.
+
+**Known approximations (not changed):**
+- **Migration trigger.** Reference uses per-island generation counters
+  (`max(island_generations) - last_migration >= interval`); EvoKit triggers on the engine's global
+  generation index. Equivalent cadence for the synchronous generational loop.
+- **No MVCC/snapshot transaction layer or embedding-based novelty.** The reference's full
+  `ProgramDatabase` has an MVCC commit/abort layer and optional LLM/embedding novelty; EvoKit uses
+  a simpler locked store with line-level SequenceMatcher novelty.
+
+---
+
 ## Known issues / open
 
 - **LLM output extraction is fragile.** `extract_thought` grabs the first `{...}`, which can

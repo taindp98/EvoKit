@@ -17,6 +17,15 @@ from evokit.plugins.populations.base import BasePopulationManager, PopulationCon
 class ReflectionBufferConfig(PopulationConfig):
     max_failure_history: int = Field(default=20, description="Maximum number of failure logs to retain")
     max_reflection_memory: int = Field(default=10, description="Maximum reflection notes in short-term buffer")
+    selection_strategy: str = Field(
+        default="non_elitist",
+        description=(
+            "Survival after each generation. 'non_elitist' (default, faithful to original "
+            "ReEvo): each generation's offspring unconditionally replace the population. "
+            "'elitist' (myirace --elitist-selection variant): keep the best `capacity` of "
+            "parents + offspring. The global best-so-far incumbent is preserved in both modes."
+        ),
+    )
 
 
 class ReflectionBuffer(BasePopulationManager):
@@ -39,6 +48,22 @@ class ReflectionBuffer(BasePopulationManager):
         self.failure_buffer: List[Individual] = []
         self.short_term_reflections: List[str] = []
         self.long_term_reflections: List[str] = []
+        # Global best-so-far incumbent, kept OUTSIDE the active population so it is
+        # never lost under non-elitist generational replacement (as ReEvo tracks
+        # its `elitist`). Exposed via get_elites so search progress is monotone.
+        self._incumbent: Optional[Individual] = None
+        self._cur_gen: Optional[int] = None
+
+    @property
+    def _non_elitist(self) -> bool:
+        return str(self.ref_cfg.selection_strategy).lower() != "elitist"
+
+    def _is_better_than(self, a: Individual, b: Optional[Individual]) -> bool:
+        if b is None or b.fitness is None:
+            return True
+        if a.fitness is None:
+            return False
+        return a.fitness > b.fitness if self.is_maximize else a.fitness < b.fitness
 
     def add(self, individual: Individual) -> bool:
         if not individual.is_valid or individual.error_trace:
@@ -49,23 +74,36 @@ class ReflectionBuffer(BasePopulationManager):
         if not individual.is_valid or individual.fitness is None:
             return False
 
+        # Track the global incumbent regardless of selection strategy.
+        if self._is_better_than(individual, self._incumbent):
+            self._incumbent = individual
+
+        if self._non_elitist:
+            # Non-elitist (faithful original ReEvo): offspring replace the
+            # population generationally. The engine adds candidates one at a time,
+            # so we detect a generation change and flush the active pool, then
+            # accumulate this generation's members (capped at capacity).
+            gen = individual.generation
+            if gen != self._cur_gen:
+                self._cur_gen = gen
+                self.population = []
+            self.population.append(individual)
+            self._sort_population()
+            if len(self.population) > self.cfg.capacity:
+                self.population = self.population[: self.cfg.capacity]
+            return True
+
+        # Elitist (myirace --elitist-selection): keep the best `capacity` of
+        # parents + offspring (replace-worst-if-better).
         if len(self.population) < self.cfg.capacity:
             self.population.append(individual)
             self._sort_population()
             return True
-
         worst = self.population[-1]
-        is_better = (
-            individual.fitness > worst.fitness
-            if self.is_maximize
-            else individual.fitness < worst.fitness
-        )
-
-        if is_better:
+        if self._is_better_than(individual, worst):
             self.population[-1] = individual
             self._sort_population()
             return True
-
         return False
 
     def _sort_population(self) -> None:
@@ -100,7 +138,16 @@ class ReflectionBuffer(BasePopulationManager):
         return random.sample(self.population, k)
 
     def get_elites(self, top_k: int = 1) -> List[Individual]:
-        return self.population[:top_k]
+        # Front-load the preserved global incumbent so best-so-far is never lost
+        # under non-elitist generational replacement (it may have fallen out of
+        # the current population). De-duplicate by id while keeping order.
+        ranked: List[Individual] = []
+        seen = set()
+        for ind in ([self._incumbent] if self._incumbent is not None else []) + self.population:
+            if ind is not None and ind.id not in seen:
+                ranked.append(ind)
+                seen.add(ind.id)
+        return ranked[:top_k]
 
     def get_all(self) -> List[Individual]:
         return list(self.population)

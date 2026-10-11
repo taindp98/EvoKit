@@ -291,3 +291,45 @@ This document tracks implementation progress across all development phases of **
 ### Phase 22: MIT License & Results GIF
 - [x] **Task 22.1**: Add `LICENSE` (MIT, "2026 EvoKit Contributors"); declare `license = {text="MIT"}` + the OSI classifier in `pyproject.toml` so metadata matches the README badge.
 - [x] **Task 22.2**: Add a "See it in action" section near the top of the README showing `assets/tensorboard_demo.gif` (TensorBoard results demo, 820x426, ~0.5MB) with a link to the telemetry guide. Added `scripts/make_demo_gif.sh` (ffmpeg palette conversion); GIF generated from the recording of the live EoH/ReEvo OBP runs.
+
+### Phase 23: ReEvo Convergence Investigation & Fidelity Fixes
+- [x] **Task 23.1**: Diagnose poor ReEvo convergence on OBP (2/3 seeds flat vs EoH improving).
+- [x] **Task 23.2**: Fix malformed-code failures (~50-70% invalid)
+  - `BaseMutationStrategy._sanitize_code()` strips leaked `{thought}`/brace-wrapped prose from extracted code (preserving real dict/set literals); ReEvo offspring prompt now pins the exact signature and forbids body-braces.
+- [x] **Task 23.3**: Wire ReEvo long-term reflection memory
+  - Persistent `long_term_reflection` on the strategy; `_update_long_term_reflection` folds each generation's short-term reflections in; offspring prompts include accumulated insights.
+- [x] **Task 23.4**: Second-pass audit vs `references/reevo/reevo.py` — fix 3 more deviations
+  - Distinct-objective parent pairing (`_select_distinct_pair`); separate elitist-mutation operator (`_mutate_elitist`, `reevo_mutate`) with the budget split by `mutation_rate` (crossover → long-term-reflect → elitist-mutate, matching `evolve()`); `filter_code` on parent snippets in prompts.
+- [x] **Task 23.5**: Record findings in `bugfixes.md`; re-run 3 seeds to validate (in progress).
+- **Verification:** 27/27 tests pass; mock smoke confirms the crossover/elitist-mutation operator split, distinct pairing, and `filter_code`.
+
+### Phase 24: EoH Fidelity Audit vs llm4ad/method/eoh
+- [x] **Task 24.1**: Compare EvoKit EoH against `references/LLM4AD/llm4ad/method/eoh` (eoh.py, prompt.py, population.py).
+  - Match: operators E1 + E2/M1/M2 (no M3); i1 cold-start; boxed `{}` thought.
+  - Mismatches fixed below; remaining approximations noted in `bugfixes.md`.
+- [x] **Task 24.2**: Operator application — all operators per step
+  - Reference `_iteratively_use_eoh_operator` runs every enabled operator (E1,E2,M1,M2) each step. EvoKit previously picked one operator at random by weight. Added `cycle_operators` (default true): offspring cycle round-robin through the enabled operators across a generation. Added `use_e2/m1/m2_operator` toggles + `_enabled_operators()`.
+- [x] **Task 24.3**: E1/E2 parents = `selection_num`
+  - Reference draws `selection_num` parents for E1/E2 crossover prompts; EvoKit hardcoded 2. Added `EoHConfig.selection_num` (default 5) and use it; M1/M2 keep 1 parent. Example config sets `selection_num: 5` to match the engine's `parent_selection_num`.
+- **Verification:** 27/27 tests pass; mock smoke shows balanced operator cycling ({e1,e2,m1,m2} evenly) and E1/E2 using 5 parents.
+
+### Phase 25: OpenEvolve Fidelity Audit vs references/openevolve
+- [x] **Task 25.1**: Deep compare EvoKit OpenEvolve against `references/openevolve/openevolve/database.py`.
+  - Critical finding: the island model was effectively bypassed — `OpenEvolveMutationStrategy` picked parent + inspirations globally (fitness-weighted) from the flat `population_view`, so islands/current_island/archive in the Pillar-1 archive never shaped what the LLM saw.
+- [x] **Task 25.2**: Thread the live population manager to strategies
+  - Engine now passes `population_manager` in `EvolutionContext.metadata` (opt-in; most strategies ignore it).
+- [x] **Task 25.3**: Make selection island-scoped and faithful (`OpenEvolveArchive`)
+  - `current_island` + `advance_island()` (reference `next_island`); `_sample_one` = UNIFORM mixed-strategy scoped to current island (exploration=uniform-from-island, exploitation=uniform-from-archive-preferring-island, random=uniform-all) — replacing the previous fitness-weighted sampling; `sample_inspirations` now draws ONLY from the parent's island plus that island's best (`_island_best`), preserving genetic isolation.
+- [x] **Task 25.4**: Faithful migration
+  - Ring migration now migrates a COPY (new id, `migrant` flag so it won't re-migrate), skips targets already holding the code, and registers the copy into the target island's MAP-Elites grid — matching `_migrate_one`.
+- [x] **Task 25.5**: Delegate selection from the strategy
+  - `OpenEvolveMutationStrategy` calls `manager.advance_island()` + `sample_parents(1)` + `sample_inspirations(...)` + `get_top(...)` when an OpenEvolve archive is present; falls back to flat-view selection otherwise.
+- **Verification:** 27/27 tests pass; mock smoke shows balanced islands with migration, active current_island rotation, populated archive, and distinct per-island best programs (island model now genuinely active).
+
+### Phase 26: ReEvo Elitist / Non-Elitist Selection Strategy
+- [x] **Task 26.1**: Make ReEvo survival configurable (`ReflectionBufferConfig.selection_strategy`)
+  - Discovery: EvoKit's `ReflectionBuffer.add()` was unconditionally elitist (replace-worst-if-better), the OPPOSITE of original ReEvo's default. Original ReEvo (`references/reevo/reevo.py`) replaces the whole population with the crossover offspring each generation (non-elitist); the myirace variant (`reevo_tsp_gls.py --elitist-selection`) keeps the best `pop_size` of parents+offspring.
+  - `selection_strategy: "non_elitist"` (default, faithful) — each generation's offspring replace the population (detected via generation change in `add()`); `"elitist"` — replace-worst-if-better.
+  - The global best-so-far incumbent is now tracked OUTSIDE the active population (mirroring ReEvo's separate `elitist`), and surfaced via `get_elites`, so best-so-far is never lost under non-elitist replacement.
+  - Example config documents the option (default non_elitist).
+- **Verification:** 27/27 tests pass; unit check confirms non-elitist generational replacement (worse offspring replace better parents, incumbent preserved) vs elitist (worse offspring rejected, better displaces worst).

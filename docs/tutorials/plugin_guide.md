@@ -214,14 +214,14 @@ EvoKit's 3-pillar decoupling makes expanding to any emerging research paradigm s
 **Core Idea**: Instead of searching for a single best algorithm, OpenEvolve explores an $N$-dimensional behavioral feature landscape (e.g., Code Complexity vs. Execution Runtime) using MAP-Elites, applying localized diff/patch mutations to candidate code.
 
 #### Pillar Mapping:
-- **Pillar 1 (Population)**: [`MAPElitesGrid`](../evokit/plugins/populations/map_elites.py) discretizes algorithms into an $N \times M$ tessellation grid based on behavioral descriptors.
-- **Pillar 2 (Mutation)**: [`DiffMutationStrategy`](../evokit/plugins/mutations/diff.py) samples parents from occupied grid niches and prompts the LLM for targeted, surgical patch improvements.
-- **Pillar 3 (Evaluator)**: [`SubprocessSandboxEvaluator`](../evokit/plugins/evaluators/subprocess_sandbox.py) executes candidates in isolation, capturing both fitness and behavioral feature telemetry.
+- **Pillar 1 (Population)**: [`MAPElitesGrid`](../../evokit/plugins/populations/map_elites.py) discretizes algorithms into an $N \times M$ tessellation grid based on behavioral descriptors.
+- **Pillar 2 (Mutation)**: [`DiffMutationStrategy`](../../evokit/plugins/mutations/diff.py) samples parents from occupied grid niches and prompts the LLM for targeted, surgical patch improvements.
+- **Pillar 3 (Evaluator)**: [`SubprocessSandboxEvaluator`](../../evokit/plugins/evaluators/subprocess_sandbox.py) executes candidates in isolation, capturing both fitness and behavioral feature telemetry.
 
 #### Configuration Blueprint (`configs/openevolve_example.yaml`):
 ```yaml
 experiment:
-  study_name: "openevolve_bpp"
+  study_name: "openevolve_obp"
   max_generations: 10
   candidates_per_generation: 4
 
@@ -423,5 +423,5 @@ class HeuristicSetArchive(BasePopulationManager):
 Because EvoKit enforces invariant boundaries:
 - Any **Population Manager** (`LineageDAG`, `ReflectionBuffer`, `MAPElites`, `ParetoArchive`, `HeuristicSetArchive`)
 - Can be combined with any **Mutation Strategy** (`EoH`, `ReEvo`, `Diff`, `MEoH`, `EoH-S`)
-- On any **Benchmark Task** (`TSP`, `BPP`, `FSSP`, `CVRP`)
+- On any **Benchmark Task** (`TSP`, `OBP`, `FSSP`, `CVRP`)
 - Executed under any **Evaluator Sandbox** (Local Subprocess, Remote Slurm, MCP JSON-RPC).

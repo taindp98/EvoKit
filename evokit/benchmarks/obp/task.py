@@ -1,5 +1,5 @@
 """
-Online Bin Packing (BPP) Benchmark Task Implementation.
+Online Bin Packing (OBP) Benchmark Task Implementation.
 Supports parallel instance-level simulation and exact Weibull dataset generation.
 """
 
@@ -12,33 +12,33 @@ from typing import Any, Dict, List, Optional
 from pydantic import Field
 
 from evokit.benchmarks.base import BaseBenchmarkTask, BenchmarkConfig, PromptSpec
-from evokit.benchmarks.bpp.prompts import BPP_PROMPT_SPEC, INITIAL_BPP_CODE
+from evokit.benchmarks.obp.prompts import OBP_PROMPT_SPEC, INITIAL_OBP_CODE
 from evokit.core.entity import MetricRecord
 
 
-class BPPTaskConfig(BenchmarkConfig):
+class OBPTaskConfig(BenchmarkConfig):
     capacity: float = Field(default=100.0, description="Bin capacity")
     train_items_per_instance: int = Field(default=200, description="Number of items per training instance")
     test_items_per_instance: int = Field(default=500, description="Number of items per test instance")
     dataset_type: str = Field(default="mixed", description="Distribution type: 'mixed' or 'weibull_llm4ad'")
 
 
-class BPPBenchmarkTask(BaseBenchmarkTask):
+class OBPBenchmarkTask(BaseBenchmarkTask):
     """Online Bin Packing Benchmark with Train/Test instance segregation."""
 
-    def __init__(self, config: Optional[Dict[str, Any] | BPPTaskConfig] = None) -> None:
-        if isinstance(config, BPPTaskConfig):
+    def __init__(self, config: Optional[Dict[str, Any] | OBPTaskConfig] = None) -> None:
+        if isinstance(config, OBPTaskConfig):
             cfg = config
         elif isinstance(config, dict):
-            cfg = BPPTaskConfig(**config)
+            cfg = OBPTaskConfig(**config)
         else:
-            cfg = BPPTaskConfig()
+            cfg = OBPTaskConfig()
         super().__init__(cfg)
-        self.bpp_cfg: BPPTaskConfig = cfg
+        self.bpp_cfg: OBPTaskConfig = cfg
 
     @property
     def name(self) -> str:
-        return "bpp_online"
+        return "obp_online"
 
     @property
     def direction(self) -> str:
@@ -46,7 +46,16 @@ class BPPBenchmarkTask(BaseBenchmarkTask):
 
     @property
     def prompt_spec(self) -> PromptSpec:
-        return BPP_PROMPT_SPEC
+        return OBP_PROMPT_SPEC
+
+    def reference_bound(self, split: str = "train") -> Optional[float]:
+        """Mean L1 lower bound (ceil(sum(items)/capacity)) over the split's
+        instances — the theoretical minimum bin count. Used by the engine to
+        report the optimality gap (score - lb) / lb."""
+        instances = self.train_instances if split == "train" else self.test_instances
+        if not instances:
+            return None
+        return float(np.mean([inst["l1_bound"] for inst in instances]))
 
     def _generate_instances(self) -> None:
         rng = np.random.default_rng(self.bpp_cfg.seed)

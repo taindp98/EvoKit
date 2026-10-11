@@ -86,7 +86,7 @@ class TestCoreComponents(unittest.TestCase):
         ctx = EvolutionContext(
             generation=1,
             population_view=["p1", "p2"],
-            task_spec={"problem": "bpp"},
+            task_spec={"problem": "obp"},
         )
         self.assertEqual(ctx.generation, 1)
         self.assertEqual(len(ctx.population_view), 2)

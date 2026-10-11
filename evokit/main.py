@@ -8,6 +8,7 @@ import argparse
 import json
 import logging
 import os
+import pathlib
 import sys
 from pathlib import Path
 from typing import Any, Dict
@@ -59,7 +60,7 @@ def assemble_engine(config_data: Dict[str, Any], dry_run: bool = False) -> Evolu
     storage = ExperimentStorage(StorageConfig(**storage_cfg))
     gateway = LLMGateway(GatewayConfig(**gateway_cfg))
 
-    benchmark = build_component(bench_cfg.get("type", "bpp_online"), BENCHMARK_REGISTRY, bench_cfg)
+    benchmark = build_component(bench_cfg.get("type", "obp_online"), BENCHMARK_REGISTRY, bench_cfg)
     population = build_component(pop_cfg.get("type", "lineage_archive"), POPULATION_REGISTRY, pop_cfg)
     mutation = build_component(mut_cfg.get("type", "eoh"), MUTATION_REGISTRY, mut_cfg)
     evaluator = build_component(eval_cfg.get("type", "subprocess_sandbox"), EVALUATOR_REGISTRY, eval_cfg)
@@ -91,6 +92,56 @@ def cmd_run(args: argparse.Namespace) -> None:
         config_data.setdefault("evaluator", {})["max_workers"] = args.max_workers
     if args.instance_workers:
         config_data.setdefault("benchmark", {})["parallel_workers"] = args.instance_workers
+
+    exp = config_data.setdefault("experiment", {})
+
+    # TensorBoard telemetry: default to <db_dir>/tensorboard unless disabled.
+    if getattr(args, "tb_log_dir", None):
+        exp["tb_log_dir"] = args.tb_log_dir
+    elif getattr(args, "no_tensorboard", False):
+        exp["tb_log_dir"] = None
+    elif not exp.get("tb_log_dir"):
+        db_path = config_data.get("storage", {}).get("db_path", "./evokit_experiments.db")
+        exp["tb_log_dir"] = str(pathlib.Path(db_path).parent / "tensorboard")
+
+    # ---- Run provenance: unique experiment id, seed, timestamp, raw-log path ----
+    import datetime as _dt
+    import uuid as _uuid
+
+    study = exp.get("study_name", "evokit_run")
+    seed = config_data.get("benchmark", {}).get("seed")
+    if args.dry_run:
+        config_data.setdefault("gateway", {})["provider"] = "mock"
+    stamp = _dt.datetime.now().strftime("%Y%m%d_%H%M%S")
+    short_hash = _uuid.uuid4().hex[:6]
+    seed_tag = f"seed{seed}" if seed is not None else "seedNA"
+    exp_id = f"{stamp}_{study}_{seed_tag}_{short_hash}"
+    exp["experiment_id"] = exp_id
+    exp["seed"] = seed
+
+    # Per-experiment terminal.txt file log for debugging, beside the TB run.
+    terminal_path = None
+    if exp.get("tb_log_dir"):
+        run_dir = pathlib.Path(exp["tb_log_dir"]) / exp_id
+        run_dir.mkdir(parents=True, exist_ok=True)
+        terminal_path = run_dir / "terminal.txt"
+        _file_handler = logging.FileHandler(terminal_path, mode="w", encoding="utf-8")
+        _file_handler.setFormatter(
+            logging.Formatter("%(asctime)s [%(levelname)s] %(name)s: %(message)s")
+        )
+        logging.getLogger().addHandler(_file_handler)
+
+    exp["run_metadata"] = {
+        "config_path": str(args.config),
+        "terminal_log": str(terminal_path) if terminal_path else "(none)",
+        "artifacts_dir": config_data.get("storage", {}).get("artifacts_dir", "?"),
+        "db_path": config_data.get("storage", {}).get("db_path", "?"),
+        "dry_run": bool(args.dry_run),
+    }
+
+    console.print(f"[dim]Experiment ID:[/dim] [bold]{exp_id}[/bold]")
+    if terminal_path:
+        console.print(f"[dim]Raw log:[/dim] {terminal_path}", soft_wrap=True)
 
     engine = assemble_engine(config_data, dry_run=args.dry_run)
     summary = engine.run()
@@ -179,11 +230,13 @@ def cli() -> None:
     run_parser.add_argument("--max-workers", type=int, help="Tier 1: Parallel sandbox workers for evaluating multiple candidates")
     run_parser.add_argument("--instance-workers", type=int, help="Tier 2: Parallel workers for evaluating instances within a benchmark task")
     run_parser.add_argument("--dry-run", action="store_true", help="Execute with mock LLM backend for zero-cost validation")
+    run_parser.add_argument("--tb-log-dir", type=str, default=None, help="Directory for TensorBoard telemetry logs (default: <artifacts_dir>/tensorboard)")
+    run_parser.add_argument("--no-tensorboard", action="store_true", help="Disable TensorBoard telemetry logging")
 
     # evaluate command
     eval_parser = subparsers.add_parser("evaluate", help="Directly evaluate a code artifact")
     eval_parser.add_argument("--code", required=True, help="Path to Python code file")
-    eval_parser.add_argument("--benchmark", default="bpp_online", help="Benchmark name (bpp_online, tsp_construct)")
+    eval_parser.add_argument("--benchmark", default="obp_online", help="Benchmark name (obp_online, tsp_construct)")
     eval_parser.add_argument("--split", default="train", choices=["train", "test"], help="Dataset split")
     eval_parser.add_argument("--timeout", type=float, default=30.0, help="Per-evaluation timeout in seconds")
     eval_parser.add_argument("--instance-workers", type=int, help="Tier 2: Parallel workers for evaluating instances")

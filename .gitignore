@@ -46,3 +46,7 @@ tmp/
 *~
 .DS_Store
 examples
+artifacts/
+references
+:memory:
+scripts/*

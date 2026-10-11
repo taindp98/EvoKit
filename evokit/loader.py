@@ -16,16 +16,18 @@ from evokit.core.base import BaseComponent
 from evokit.core.gateway import LLMGateway, GatewayConfig
 from evokit.core.storage import ExperimentStorage, StorageConfig
 from evokit.benchmarks.base import BaseBenchmarkTask
-from evokit.benchmarks.bpp import BPPBenchmarkTask, BPPTaskConfig
+from evokit.benchmarks.obp import OBPBenchmarkTask, OBPTaskConfig
 from evokit.benchmarks.tsp import TSPBenchmarkTask, TSPTaskConfig
 from evokit.plugins.populations.base import BasePopulationManager
 from evokit.plugins.populations.lineage_archive import LineageGraphArchive, LineageArchiveConfig
 from evokit.plugins.populations.reflection_buffer import ReflectionBuffer, ReflectionBufferConfig
 from evokit.plugins.populations.map_elites import MAPElitesGrid, MAPElitesConfig
+from evokit.plugins.populations.openevolve_archive import OpenEvolveArchive, OpenEvolveArchiveConfig
 from evokit.plugins.mutations.base import BaseMutationStrategy
 from evokit.plugins.mutations.eoh import EoHMutationStrategy, EoHConfig
 from evokit.plugins.mutations.reevo import ReEvoMutationStrategy, ReEvoConfig
 from evokit.plugins.mutations.diff import DiffMutationStrategy
+from evokit.plugins.mutations.openevolve import OpenEvolveMutationStrategy, OpenEvolveConfig
 from evokit.plugins.evaluators.base import BaseEvaluator
 from evokit.plugins.evaluators.subprocess_sandbox import SubprocessSandboxEvaluator
 from evokit.plugins.evaluators.mcp_evaluator import MCPEvaluator
@@ -34,12 +36,14 @@ POPULATION_REGISTRY: Dict[str, Type[BasePopulationManager]] = {
     "lineage_archive": LineageGraphArchive,
     "reflection_buffer": ReflectionBuffer,
     "map_elites": MAPElitesGrid,
+    "openevolve_archive": OpenEvolveArchive,
 }
 
 MUTATION_REGISTRY: Dict[str, Type[BaseMutationStrategy]] = {
     "eoh": EoHMutationStrategy,
     "reevo": ReEvoMutationStrategy,
     "diff": DiffMutationStrategy,
+    "openevolve": OpenEvolveMutationStrategy,
 }
 
 EVALUATOR_REGISTRY: Dict[str, Type[BaseEvaluator]] = {
@@ -48,7 +52,7 @@ EVALUATOR_REGISTRY: Dict[str, Type[BaseEvaluator]] = {
 }
 
 BENCHMARK_REGISTRY: Dict[str, Type[BaseBenchmarkTask]] = {
-    "bpp_online": BPPBenchmarkTask,
+    "obp_online": OBPBenchmarkTask,
     "tsp_construct": TSPBenchmarkTask,
 }
 

@@ -1,6 +1,6 @@
-# EvoKit Configuration: MAP-Elites with Diff Mutation on BPP Online
+# EvoKit Configuration: MAP-Elites with Diff Mutation on OBP Online
 experiment:
-  study_name: "map_elites_bpp"
+  study_name: "map_elites_obp"
   max_generations: 5
   candidates_per_generation: 2
   evaluate_test_split: true
@@ -8,20 +8,20 @@ experiment:
   seed_evaluation: true
 
 storage:
-  db_path: "./artifacts/map_elites_bpp/experiments.db"
-  artifacts_dir: "./artifacts/map_elites_bpp/code"
+  db_path: "./artifacts/map_elites_obp/experiments.db"
+  artifacts_dir: "./artifacts/map_elites_obp/code"
   direction: "MINIMIZE"
 
 gateway:
   provider: "vllm"
-  base_url: "http://172.22.4.1:8000/v1"
+  base_url: "http://localhost:8000/v1"
   model: "mistralai/Devstral-Small-2-24B-Instruct-2512"
   temperature: 0.8
   max_tokens: 2048
   timeout: 120.0
 
 benchmark:
-  type: "bpp_online"
+  type: "obp_online"
   capacity: 100.0
   num_train_instances: 5
   num_test_instances: 10

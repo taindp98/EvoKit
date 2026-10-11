@@ -64,6 +64,7 @@ class LLMGateway(BaseComponent):
         self._lock = threading.Lock()
         self._total_prompt_tokens = 0
         self._total_completion_tokens = 0
+        self._request_count = 0
         self._mock_responses: List[str] = []
         self._mock_call_count = 0
 
@@ -93,6 +94,12 @@ class LLMGateway(BaseComponent):
         with self._lock:
             return self._total_prompt_tokens + self._total_completion_tokens
 
+    @property
+    def request_count(self) -> int:
+        """Total number of successful LLM generation requests (calls) dispatched."""
+        with self._lock:
+            return self._request_count
+
     def get_token_usage(self) -> Dict[str, Any]:
         with self._lock:
             tot = self._total_prompt_tokens + self._total_completion_tokens
@@ -100,6 +107,7 @@ class LLMGateway(BaseComponent):
                 "prompt_tokens": self._total_prompt_tokens,
                 "completion_tokens": self._total_completion_tokens,
                 "total_tokens": tot,
+                "request_count": self._request_count,
                 "token_budget": self.cfg.token_budget,
                 "budget_exhausted": (
                     self.cfg.token_budget is not None and tot >= self.cfg.token_budget
@@ -245,6 +253,7 @@ class LLMGateway(BaseComponent):
             comp_len = len(content) // 4
             self._total_prompt_tokens += prompt_len
             self._total_completion_tokens += comp_len
+            self._request_count += 1
 
         return LLMResponse(
             content=content,
@@ -299,6 +308,7 @@ class LLMGateway(BaseComponent):
                 with self._lock:
                     self._total_prompt_tokens += p_tokens
                     self._total_completion_tokens += c_tokens
+                    self._request_count += 1
 
                 return LLMResponse(
                     content=message_content,

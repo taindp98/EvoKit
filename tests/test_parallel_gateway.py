@@ -56,7 +56,7 @@ class TestParallelGateway(unittest.TestCase):
             population_view=[
                 Individual(code="def priority(item, bins): return -bins", fitness=10.0, is_valid=True)
             ],
-            task_spec={"description": "BPP", "initial_code": "def priority(item, bins): pass"},
+            task_spec={"description": "OBP", "initial_code": "def priority(item, bins): pass"},
             runtime_config={},
             llm_gateway=gw,
         )

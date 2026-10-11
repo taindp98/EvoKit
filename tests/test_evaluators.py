@@ -4,7 +4,7 @@ SubprocessSandboxEvaluator and MCPEvaluator.
 """
 
 import unittest
-from evokit.benchmarks.bpp import BPPBenchmarkTask, BPPTaskConfig, INITIAL_BPP_CODE
+from evokit.benchmarks.obp import OBPBenchmarkTask, OBPTaskConfig, INITIAL_OBP_CODE
 from evokit.core.entity import Individual
 from evokit.plugins.evaluators.subprocess_sandbox import SubprocessSandboxEvaluator
 from evokit.plugins.evaluators.base import EvaluatorConfig
@@ -13,7 +13,7 @@ from evokit.plugins.evaluators.mcp_evaluator import MCPEvaluator
 
 class TestEvaluators(unittest.TestCase):
     def setUp(self):
-        self.task = BPPBenchmarkTask(BPPTaskConfig(
+        self.task = OBPBenchmarkTask(OBPTaskConfig(
             num_train_instances=2,
             train_items_per_instance=20,
             seed=1,
@@ -22,7 +22,7 @@ class TestEvaluators(unittest.TestCase):
 
     def test_subprocess_sandbox_success(self):
         evaluator = SubprocessSandboxEvaluator(EvaluatorConfig(timeout_seconds=15.0, memory_limit_mb=1024))
-        ind = Individual(code=INITIAL_BPP_CODE)
+        ind = Individual(code=INITIAL_OBP_CODE)
 
         record = evaluator.evaluate(ind, self.task, split="train")
         self.assertTrue(record.is_valid)
@@ -54,7 +54,7 @@ def priority(item, bins):
 
     def test_mcp_evaluator(self):
         mcp = MCPEvaluator(EvaluatorConfig(timeout_seconds=10.0))
-        ind = Individual(code=INITIAL_BPP_CODE)
+        ind = Individual(code=INITIAL_OBP_CODE)
 
         # Test request formatting
         req = mcp.format_mcp_request(123, ind, self.task, split="train")

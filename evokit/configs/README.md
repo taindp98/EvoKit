@@ -24,14 +24,14 @@ storage:
 
 gateway:
   provider: "vllm"                        # vllm, openai, anthropic, or mock
-  base_url: "http://172.22.4.1:8000/v1"   # Inference endpoint
+  base_url: "http://localhost:8000/v1"   # Inference endpoint
   model: "mistralai/Devstral-Small-2-24B-Instruct-2512"
   temperature: 0.8
   max_tokens: 2048
   timeout: 120.0
 
 benchmark:
-  type: "bpp_online"                      # bpp_online or tsp_construct
+  type: "obp_online"                      # obp_online or tsp_construct
   # Problem-specific parameters...
 
 population:
@@ -54,11 +54,11 @@ evaluator:
 
 | Config File | Strategy | Problem Benchmark | Population Manager |
 |---|---|---|---|
-| `eoh_bpp.yaml` | EoH (E1/E2 & M1/M2) | Online Bin Packing (`bpp_online`) | Lineage Graph Archive |
+| `eoh_obp.yaml` | EoH (E1/E2 & M1/M2) | Online Bin Packing (`obp_online`) | Lineage Graph Archive |
 | `eoh_tsp.yaml` | EoH (E1/E2 & M1/M2) | Constructive TSP (`tsp_construct`) | Lineage Graph Archive |
 | `reevo_tsp.yaml` | ReEvo (Reflective Loop) | Constructive TSP (`tsp_construct`) | Reflection Buffer |
-| `reevo_bpp.yaml` | ReEvo (Reflective Loop) | Online Bin Packing (`bpp_online`) | Reflection Buffer |
-| `map_elites_bpp.yaml` | Diff Mutations | Online Bin Packing (`bpp_online`) | MAP-Elites Grid |
+| `reevo_obp.yaml` | ReEvo (Reflective Loop) | Online Bin Packing (`obp_online`) | Reflection Buffer |
+| `map_elites_obp.yaml` | Diff Mutations | Online Bin Packing (`obp_online`) | MAP-Elites Grid |
 
 ---
 
@@ -67,14 +67,14 @@ evaluator:
 EvoKit's loader automatically interpolates environment variables:
 ```yaml
 gateway:
-  base_url: "${VLLM_URL:-http://172.22.4.1:8000/v1}"
+  base_url: "${VLLM_URL:-http://localhost:8000/v1}"
   api_key: "${OPENAI_API_KEY:-EMPTY}"
 ```
 
 Parameters can also be dynamically overridden from the CLI:
 ```bash
-python evokit/main.py run -c evokit/configs/eoh_bpp.yaml \
-  --vllm-url http://172.22.4.1:8000/v1 \
+python evokit/main.py run -c evokit/configs/eoh_obp.yaml \
+  --vllm-url http://localhost:8000/v1 \
   --model mistralai/Devstral-Small-2-24B-Instruct-2512 \
   -g 10
 ```

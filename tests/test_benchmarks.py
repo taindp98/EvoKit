@@ -1,23 +1,23 @@
 """
 Unit tests for EvoKit Benchmarks:
-Online Bin Packing (BPP) and Constructive Traveling Salesperson (TSP).
+Online Bin Packing (OBP) and Constructive Traveling Salesperson (TSP).
 """
 
 import unittest
-from evokit.benchmarks.bpp import BPPBenchmarkTask, BPPTaskConfig, INITIAL_BPP_CODE
+from evokit.benchmarks.obp import OBPBenchmarkTask, OBPTaskConfig, INITIAL_OBP_CODE
 from evokit.benchmarks.tsp import TSPBenchmarkTask, TSPTaskConfig, INITIAL_TSP_CODE
 
 
 class TestBenchmarks(unittest.TestCase):
     def test_bpp_benchmark(self):
-        cfg = BPPTaskConfig(
+        cfg = OBPTaskConfig(
             num_train_instances=3,
             num_test_instances=2,
             train_items_per_instance=50,
             test_items_per_instance=50,
             seed=42,
         )
-        task = BPPBenchmarkTask(cfg)
+        task = OBPBenchmarkTask(cfg)
         task.setup()
 
         self.assertEqual(len(task.train_instances), 3)
@@ -25,7 +25,7 @@ class TestBenchmarks(unittest.TestCase):
         self.assertEqual(task.direction, "MINIMIZE")
 
         # Test initial baseline code
-        record = task.evaluate_code(INITIAL_BPP_CODE, split="train")
+        record = task.evaluate_code(INITIAL_OBP_CODE, split="train")
         self.assertTrue(record.is_valid)
         self.assertIsNotNone(record.fitness)
         self.assertGreater(record.fitness, 0.0)  # Positive bin count (MINIMIZE)
@@ -33,7 +33,7 @@ class TestBenchmarks(unittest.TestCase):
         self.assertIn("avg_l1_ratio", record.metrics)
 
         # Test evaluation on test split
-        test_record = task.evaluate_code(INITIAL_BPP_CODE, split="test")
+        test_record = task.evaluate_code(INITIAL_OBP_CODE, split="test")
         self.assertTrue(test_record.is_valid)
         self.assertEqual(test_record.metrics["split"], "test")
 
@@ -45,7 +45,7 @@ class TestBenchmarks(unittest.TestCase):
 
         # Context spec
         spec = task.get_context_spec()
-        self.assertEqual(spec["benchmark_name"], "bpp_online")
+        self.assertEqual(spec["benchmark_name"], "obp_online")
         self.assertEqual(spec["function_name"], "priority")
         self.assertEqual(spec["direction"], "MINIMIZE")
 

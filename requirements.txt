@@ -9,6 +9,12 @@ rich>=12.0.0
 optuna>=3.0.0
 optuna-dashboard>=0.10.0
 
+# Optional: TensorBoard telemetry (objective vs. generations / LLM calls / FEs).
+# A SummaryWriter backend is required for logging: torch.utils.tensorboard, or
+# tensorboardX as a torch-free fallback.
+tensorboard>=2.10.0
+tensorboardX>=2.6
+
 # Optional: Testing & Development
 pytest>=7.0.0
 pytest-cov>=4.0.0

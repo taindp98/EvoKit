@@ -59,6 +59,14 @@ class BasePopulationManager(BaseComponent):
         """Return count of active individuals."""
         pass
 
+    def on_generation_end(self, generation: int) -> None:
+        """Optional hook invoked by the engine after each generation completes.
+
+        Default is a no-op. Population plugins that maintain cross-generational
+        structure (e.g. OpenEvolve's periodic island migration) override this.
+        """
+        return None
+
     def get_view(self) -> List[Dict[str, Any]]:
         """Return a lightweight serializable view of current population state."""
         return [

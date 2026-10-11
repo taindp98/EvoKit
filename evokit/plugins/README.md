@@ -46,4 +46,4 @@ Every state-of-the-art LLM-guided evolutionary algorithm in the literature maps 
 | **MEoH** *(Multi-Objective EoH)* | Pareto-optimal frontier algorithm search | `ParetoFrontArchive` (non-dominated sorting) | `MEoHMutationStrategy` (trade-off prompts) | `SubprocessSandboxEvaluator` |
 | **EoH-S** *(Evolution of Heuristic Set)* | Complementary portfolio coverage for hard instances | `ComplementarySetArchive` (instance portfolio cover) | `EoHSMutationStrategy` (hard-instance targeted prompts) | `SubprocessSandboxEvaluator` |
 
-> For complete code blueprints and recipes for implementing **OpenEvolve**, **MEoH**, and **EoH-S**, see the [Method Expansion Guide in docs/plugin_guide.md](../../docs/plugin_guide.md#7-method-expansion-recipes-openevolve-meoh-eoh-s).
+> For complete code blueprints and recipes for implementing **OpenEvolve**, **MEoH**, and **EoH-S**, see the [Method Expansion Guide in docs/plugin_guide.md](../../docs/tutorials/plugin_guide.md#7-method-expansion-recipes-openevolve-meoh-eoh-s).

@@ -10,7 +10,7 @@ import unittest
 
 from evokit.loader import load_yaml_config
 from evokit.main import assemble_engine
-from evokit.benchmarks.bpp import INITIAL_BPP_CODE
+from evokit.benchmarks.obp import INITIAL_OBP_CODE
 
 
 class TestEngineIntegration(unittest.TestCase):
@@ -37,7 +37,7 @@ gateway:
   provider: "mock"
 
 benchmark:
-  type: "bpp_online"
+  type: "obp_online"
   capacity: 100.0
   num_train_instances: 2
   num_test_instances: 2
@@ -70,13 +70,13 @@ evaluator:
 
         # Set mock response for LLM code generation
         engine.gateway.set_mock_responses([
-            "{Idea: Best fit variant}\n```python\n" + INITIAL_BPP_CODE + "\n```"
+            "{Idea: Best fit variant}\n```python\n" + INITIAL_OBP_CODE + "\n```"
         ])
 
         summary = engine.run()
 
         # 1. Verify summary telemetry
-        self.assertEqual(summary["benchmark"], "bpp_online")
+        self.assertEqual(summary["benchmark"], "obp_online")
         self.assertEqual(summary["total_generations"], 2)
         self.assertGreater(summary["population_size"], 0)
         self.assertEqual(len(summary["test_generalization"]), 1)

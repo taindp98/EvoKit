@@ -20,6 +20,36 @@ from evokit.core.base import BaseComponent, ComponentConfig
 from evokit.core.entity import Individual
 
 
+def _optuna_schema_identifiers() -> tuple[int, str, Optional[str]]:
+    """Return (schema_version, library_version, alembic_head_revision) for the
+    installed Optuna, so the hand-written SQLite DB matches the optuna-dashboard
+    that will open it. Falls back to safe constants if Optuna is not installed."""
+    schema_version = 12
+    library_version = "5.0.0"
+    alembic_head: Optional[str] = None
+    try:
+        import optuna  # noqa: WPS433
+        from optuna.storages._rdb import models  # noqa: WPS433
+
+        schema_version = int(models.SCHEMA_VERSION)
+        library_version = str(optuna.version.__version__)
+    except Exception:
+        return schema_version, library_version, alembic_head
+
+    # Resolve the Alembic migration head bundled with this Optuna install.
+    try:
+        from alembic.config import Config  # noqa: WPS433
+        from alembic.script import ScriptDirectory  # noqa: WPS433
+
+        versions_dir = Path(models.__file__).resolve().parent / "alembic"
+        cfg = Config()
+        cfg.set_main_option("script_location", str(versions_dir))
+        alembic_head = ScriptDirectory.from_config(cfg).get_current_head()
+    except Exception:
+        alembic_head = None
+    return schema_version, library_version, alembic_head
+
+
 class StorageConfig(ComponentConfig):
     db_path: str = Field(default="./evokit_experiments.db", description="SQLite database path")
     artifacts_dir: str = Field(default="./artifacts", description="Directory for physical code artifacts")
@@ -44,7 +74,10 @@ class ExperimentStorage(BaseComponent):
         else:
             self.cfg = StorageConfig()
 
-        self.db_path = Path(self.cfg.db_path).resolve()
+        # ":memory:" is SQLite's in-memory sentinel, not a filesystem path; keep
+        # it verbatim so we don't create a stray on-disk file named ":memory:".
+        self._in_memory = str(self.cfg.db_path) == ":memory:"
+        self.db_path = Path(self.cfg.db_path) if self._in_memory else Path(self.cfg.db_path).resolve()
         self.artifacts_dir = Path(self.cfg.artifacts_dir).resolve()
         self._conn: Optional[sqlite3.Connection] = None
         self._study_id: Optional[int] = None
@@ -52,7 +85,8 @@ class ExperimentStorage(BaseComponent):
 
     def _setup_internal(self) -> None:
         self.artifacts_dir.mkdir(parents=True, exist_ok=True)
-        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        if not self._in_memory:
+            self.db_path.parent.mkdir(parents=True, exist_ok=True)
 
         self._conn = sqlite3.connect(str(self.db_path), timeout=30.0)
         self._conn.execute("PRAGMA journal_mode = WAL;")
@@ -73,14 +107,43 @@ class ExperimentStorage(BaseComponent):
         # Optuna Compatible Tables
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS version_info (
-            version_info_id INTEGER PRIMARY KEY AUTOINCREMENT,
-            schema_version INTEGER NOT NULL
+            version_info_id INTEGER PRIMARY KEY,
+            schema_version INTEGER,
+            library_version VARCHAR(256),
+            CHECK (version_info_id=1)
         );
         """)
 
+        # Discover the installed Optuna's schema/library version and Alembic head
+        # so the hand-written DB stays compatible with the optuna-dashboard the
+        # user actually has, rather than hardcoding a single Optuna release.
+        schema_version, library_version, alembic_head = _optuna_schema_identifiers()
+
         cursor.execute("SELECT COUNT(*) FROM version_info;")
         if cursor.fetchone()[0] == 0:
-            cursor.execute("INSERT INTO version_info (schema_version) VALUES (13);")
+            # Match Optuna's RDB schema: single row (id=1), schema_version,
+            # plus the library_version column the dashboard's ORM requires.
+            cursor.execute(
+                "INSERT INTO version_info (version_info_id, schema_version, library_version) "
+                "VALUES (1, ?, ?);",
+                (schema_version, library_version),
+            )
+
+        # Alembic migration-tracking table: optuna-dashboard and RDBStorage check
+        # the current migration revision against their head; without this table the
+        # revision reads as NULL and the schema-compatibility check fails.
+        if alembic_head is not None:
+            cursor.execute(
+                "CREATE TABLE IF NOT EXISTS alembic_version ("
+                "version_num VARCHAR(32) NOT NULL, "
+                "CONSTRAINT alembic_version_pkc PRIMARY KEY (version_num));"
+            )
+            cursor.execute("SELECT COUNT(*) FROM alembic_version;")
+            if cursor.fetchone()[0] == 0:
+                cursor.execute(
+                    "INSERT INTO alembic_version (version_num) VALUES (?);",
+                    (alembic_head,),
+                )
 
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS studies (
@@ -144,7 +207,7 @@ class ExperimentStorage(BaseComponent):
 
         cursor.execute("""
         CREATE TABLE IF NOT EXISTS trial_params (
-            trial_param_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            param_id INTEGER PRIMARY KEY AUTOINCREMENT,
             trial_id INTEGER NOT NULL,
             param_name VARCHAR(512) NOT NULL,
             param_value FLOAT NOT NULL,

@@ -1,6 +1,6 @@
-# `evokit.benchmarks.bpp`: Online 1D Bin Packing
+# `evokit.benchmarks.obp`: Online 1D Bin Packing
 
-This module implements the **Online 1D Bin Packing Problem (BPP)** benchmark.
+This module implements the **Online 1D Bin Packing Problem (OBP)** benchmark.
 
 ---
 
@@ -39,7 +39,7 @@ def priority(item: float, bins: np.ndarray) -> np.ndarray:
 
 ## Benchmark Configuration
 
-Controlled via `BPPTaskConfig`:
+Controlled via `OBPTaskConfig`:
 - `capacity`: Bin capacity limit (default: `100.0`).
 - `train_items_per_instance`: Items per training stream (default: `200`).
 - `test_items_per_instance`: Items per held-out test stream (default: `500`).

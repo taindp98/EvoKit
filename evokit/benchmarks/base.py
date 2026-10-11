@@ -51,7 +51,7 @@ class BaseBenchmarkTask(BaseComponent):
     @property
     @abstractmethod
     def name(self) -> str:
-        """Benchmark name (e.g., 'bpp_online', 'tsp_construct')."""
+        """Benchmark name (e.g., 'obp_online', 'tsp_construct')."""
         pass
 
     @property
@@ -84,6 +84,19 @@ class BaseBenchmarkTask(BaseComponent):
         Returns a structured MetricRecord.
         """
         pass
+
+    def reference_bound(self, split: str = "train") -> Optional[float]:
+        """Optional domain reference value for computing an optimality gap.
+
+        Benchmarks that have a meaningful reference point — a theoretical lower
+        bound, a known optimum, or a strong baseline score — may override this
+        to return that value (in the same units/direction as fitness). The
+        engine uses it only to annotate the trajectory with a ``gap``; a gap is
+        computed solely when this returns a non-None value, so benchmarks
+        without such a reference (the default) simply omit the gap. This keeps
+        the invariant engine free of any per-benchmark metric assumptions.
+        """
+        return None
 
     def get_context_spec(self) -> Dict[str, Any]:
         """Serializable specification dictionary for EvolutionContext."""

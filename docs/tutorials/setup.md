@@ -11,7 +11,7 @@
 ### 1. Install from source (editable mode)
 
 ```bash
-git clone https://github.com/taindp98/myirace.git
+git clone https://github.com/taindp98/EvoKit.git
 cd myirace/EvoKit
 pip install -e .
 ```

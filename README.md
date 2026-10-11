@@ -65,7 +65,7 @@ See [docs/tutorials/telemetry.md](docs/tutorials/telemetry.md) for the Optuna Da
 ## Install
 
 ```bash
-git clone https://github.com/taindp98/myirace.git
+git clone https://github.com/taindp98/EvoKit.git
 cd myirace/EvoKit
 pip install -e .            # or: pip install -r requirements.txt
 evokit --help
@@ -209,7 +209,7 @@ If you use EvoKit in your research, please cite it:
   author  = {EvoKit Contributors},
   year    = {2026},
   version = {0.0.1},
-  url     = {https://github.com/taindp98/myirace}
+  url     = {https://github.com/taindp98/EvoKit}
 }
 ```
 

@@ -344,3 +344,11 @@ This document tracks implementation progress across all development phases of **
 - [x] **Task 27.3**: Harden `extract_code` against leaked prose
   - `_sanitize_code` is now parse-guided: valid code returned untouched; on parse failure, drop leaked `{thought}`/brace-wrapped and bare-English-prose lines and keep the edit only if it restores parseability. Fixes candidates that were wrongly marked invalid by rationale prose leaking into the function body.
 - **Verification:** 27/27 tests pass.
+
+### Phase 28: EoH Convergence Fixes (token budget, prompts, archive, init-pop)
+Verified an external diagnosis (Antigravity) against code + logs; all findings confirmed. The flat-at-Best-Fit behavior was a compound failure: `max_tokens: 512` truncated ~90% of candidates (syntax errors / no-return → "Expected N priority values, got 1"), which starved gen 0 (2/20 valid), degenerated the parent pool, and the strict elitist archive then locked the pool at the baseline.
+- [x] **Task 28.1**: Raise `max_tokens` 512 → 2048 in the example configs (gateway + mutation), matching the reference wrapper — removes the dominant truncation failure.
+- [x] **Task 28.2**: Align EoH prompts with LLM4AD `prompt.py` (`evokit/plugins/mutations/eoh.py`): one-sentence boxed `{description}` + implement-the-function + "do not give additional explanations / no prose in the body"; strip parent docstrings from prompt snippets (`indi.docstring=''`).
+- [x] **Task 28.3**: Fix `LineageGraphArchive` admission: score/code de-duplication (`dedup_by_score`, default on, = LLM4AD `has_duplicate_function`) + (parents+offspring) survival that admits equal/intermediate candidates while the pool is below capacity, instead of the strict "< worst" lock.
+- [x] **Task 28.4**: Optional full init-pop (`EngineConfig.ensure_init_pop`, default False; `ensure_init_pop_max_attempts`): when on, resample gen 0 until `initial_population_size` candidates are admitted (LLM4AD `_iteratively_init_population`), bounded by attempts and with early-stop on no-progress. One-shot batch remains the default.
+- **Verification:** 27/27 tests pass; unit checks confirm archive admits diverse/equal candidates and dedups by score, and ensure_init_pop retries with honest valid/admitted logging + early-stop.

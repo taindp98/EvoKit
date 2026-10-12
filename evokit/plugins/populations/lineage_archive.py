@@ -16,6 +16,15 @@ from evokit.plugins.populations.base import BasePopulationManager, PopulationCon
 
 class LineageArchiveConfig(PopulationConfig):
     tournament_size: int = Field(default=2, description="Tournament size for parent selection")
+    dedup_by_score: bool = Field(
+        default=True,
+        description=(
+            "Reject candidates whose code or exact fitness duplicates an existing "
+            "population member (LLM4AD EoH `has_duplicate_function`). Forces "
+            "behaviorally distinct heuristics and prevents the Best-Fit baseline "
+            "from cloning across the whole pool."
+        ),
+    )
 
 
 class LineageGraphArchive(BasePopulationManager):
@@ -51,26 +60,25 @@ class LineageGraphArchive(BasePopulationManager):
         if not individual.is_valid or individual.fitness is None:
             return False
 
-        # Elitist admission to active pool
-        if len(self.population) < self.cfg.capacity:
-            self.population.append(individual)
-            self._sort_population()
-            return True
+        # Score/code de-duplication (LLM4AD EoH `has_duplicate_function`): reject a
+        # candidate whose code or exact fitness already exists in the pool, so the
+        # population keeps behaviorally distinct heuristics instead of cloning the
+        # baseline. (Disable via dedup_by_score=False for the old behavior.)
+        if self.archive_cfg.dedup_by_score:
+            for member in self.population:
+                if member.code == individual.code or member.fitness == individual.fitness:
+                    return False
 
-        # Check if individual outperforms the worst in active population
-        worst = self.population[-1]
-        is_better = (
-            individual.fitness > worst.fitness
-            if self.is_maximize
-            else individual.fitness < worst.fitness
-        )
-
-        if is_better:
-            self.population[-1] = individual
-            self._sort_population()
-            return True
-
-        return False
+        # (parents + offspring) survival: admit, then keep the best `capacity`.
+        # While the pool is below capacity this admits any valid, non-duplicate
+        # candidate — including equal/intermediate ones — so the search is not
+        # frozen by a strict "must beat the worst" test on a tiny pool.
+        self.population.append(individual)
+        self._sort_population()
+        if len(self.population) > self.cfg.capacity:
+            self.population = self.population[: self.cfg.capacity]
+        # Admitted iff it survived the trim.
+        return individual.id in {m.id for m in self.population}
 
     def _sort_population(self) -> None:
         """Sort active population best-first."""

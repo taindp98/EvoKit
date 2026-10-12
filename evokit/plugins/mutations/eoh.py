@@ -65,9 +65,29 @@ class EoHMutationStrategy(BaseMutationStrategy):
         w_values = [weights[op] for op in ops]
         return random.choices(ops, weights=w_values, k=1)[0]
 
+    @staticmethod
+    def _strip_docstring(code: str) -> str:
+        """Remove the function docstring from a parent snippet shown in prompts
+        (LLM4AD sets `indi.docstring = ''`), to save context and keep the model
+        focused on the logic rather than prose."""
+        import re
+        # Drop a triple-quoted block that follows the def line.
+        return re.sub(r'("""|\'\'\')(?:.|\n)*?\1', "", code, count=1).strip()
+
+    # Standard instruction footer, matching LLM4AD EoH prompt.py: one-sentence
+    # boxed description + the function, and nothing else.
+    _INSTRUCTIONS = (
+        "1. First, describe your new algorithm and main steps in ONE sentence. "
+        "The description must be enclosed within boxed braces: {description}.\n"
+        "2. Next, implement it as a single complete, executable Python function in a "
+        "```python ... ``` code block. Keep the exact function name and signature.\n"
+        "Do not give additional explanations, and do not put any prose inside the function body."
+    )
+
     def _build_prompt(self, op: str, task_spec: Dict[str, Any], parents: List[Individual]) -> str:
         desc = task_spec.get("description", "")
         func_spec = f"Function Name: {task_spec.get('function_name', 'solve')}\nSignature: {task_spec.get('signature', '')}\nDocstring: {task_spec.get('docstring', '')}"
+        instr = self._INSTRUCTIONS
 
         if op == "i1":
             return f"""You are an expert algorithm designer.
@@ -78,13 +98,15 @@ Interface:
 {func_spec}
 
 Instructions:
-1. Enclose your core algorithmic thought and design rationale in curly braces: {{thought}}
-2. Provide the complete executable Python function in a single ```python code block.
+{instr}
 """
 
         parent_blocks = []
         for i, p in enumerate(parents):
-            parent_blocks.append(f"Algorithm {i+1} (Fitness: {p.fitness}):\nIdea: {p.thought or 'N/A'}\n```python\n{p.code}\n```")
+            parent_blocks.append(
+                f"Algorithm {i+1} (Fitness: {p.fitness}):\nIdea: {p.thought or 'N/A'}\n"
+                f"```python\n{self._strip_docstring(p.code)}\n```"
+            )
         parent_str = "\n\n".join(parent_blocks)
 
         if op == "e1":
@@ -98,8 +120,7 @@ Problem context:
 
 Operator: Cross-parent Exploration (E1)
 Task: Identify the underlying ideas and contrasting principles of the above algorithms. Synthesize a brand-new heuristic algorithm that combines complementary insights.
-1. Put your core idea in curly braces: {{thought}}
-2. Write complete executable Python function inside ```python ... ``` block.
+{instr}
 """
 
         elif op == "e2":
@@ -113,8 +134,7 @@ Problem context:
 
 Operator: Common Backbone Synthesis (E2)
 Task: Identify the common successful algorithmic structure shared by these algorithms and synthesize a clean, refined version.
-1. Put your core idea in curly braces: {{thought}}
-2. Write complete executable Python code inside ```python ... ``` block.
+{instr}
 """
 
         elif op == "m1":
@@ -128,8 +148,7 @@ Problem context:
 
 Operator: Component Substitution (M1)
 Task: Keep the high-level strategy of the algorithm, but replace one key sub-heuristic or decision rule with a novel design.
-1. Put your core idea in curly braces: {{thought}}
-2. Write complete executable Python code inside ```python ... ``` block.
+{instr}
 """
 
         elif op == "m2":
@@ -143,8 +162,7 @@ Problem context:
 
 Operator: Parameter & Threshold Mutation (M2)
 Task: Refine scoring coefficients, thresholds, normalization constants, and edge condition logic of this algorithm.
-1. Put your core idea in curly braces: {{thought}}
-2. Write complete executable Python code inside ```python ... ``` block.
+{instr}
 """
 
         return f"{desc}\n{func_spec}"

@@ -31,6 +31,8 @@ class EngineConfig(BaseModel):
     evaluate_test_split: bool = Field(default=True, description="Perform hold-out generalization evaluation at end")
     seed_evaluation: bool = Field(default=True, description="Evaluate baseline initial code as generation 0")
     initial_population_size: Optional[int] = Field(default=None, description="If set, LLM-sample this many candidates as generation 0 (EoH i1 cold-start) instead of the single baseline seed")
+    ensure_init_pop: bool = Field(default=False, description="Generation 0 sampling mode. False (default): one-shot batch of initial_population_size candidates. True: keep resampling until initial_population_size VALID candidates are admitted (LLM4AD EoH behavior), bounded by ensure_init_pop_max_attempts.")
+    ensure_init_pop_max_attempts: int = Field(default=5, description="With ensure_init_pop=True, cap total sampling rounds at this multiple of initial_population_size before giving up.")
     tb_log_dir: Optional[str] = Field(default=None, description="Directory for TensorBoard telemetry logs (disabled if None)")
     experiment_id: Optional[str] = Field(default=None, description="Unique run identifier (timestamp_study_seed_hash)")
     seed: Optional[int] = Field(default=None, description="Random seed for this run (for provenance)")
@@ -299,11 +301,10 @@ class EvolutionEngine(BaseComponent):
             extra_scalars={"cumulative_tokens": float(usage.get("total_tokens", 0))},
         )
 
-    def _sample_initial_population(self, size: int) -> int:
-        """Generation 0: LLM-sample `size` candidates via the mutation strategy's
-        cold-start (empty population -> EoH i1), evaluate, store, and seed the
-        archive. Mirrors the reference reproduction's initial population.
-        Returns the number of candidates sampled."""
+    def _sample_batch_gen0(self, n: int) -> tuple[int, int, int]:
+        """Sample, evaluate, store, and admit `n` cold-start candidates at gen 0.
+        Returns (num_sampled, num_valid, num_admitted) — admitted reflects the
+        archive's own policy (e.g. dedup/capacity), which is what grows the pool."""
         ctx = EvolutionContext(
             generation=0,
             population_view=[],
@@ -312,9 +313,10 @@ class EvolutionEngine(BaseComponent):
             llm_gateway=self.gateway,
             metadata={},
         )
-        candidates = self.mutation.mutate(ctx, num_candidates=size)
+        candidates = self.mutation.mutate(ctx, num_candidates=n)
         records = self.evaluator.evaluate_batch(candidates, self.benchmark, split="train")
         valid = 0
+        admitted = 0
         for cand, record in zip(candidates, records):
             cand.apply_evaluation(record)
             if cand.is_valid and cand.fitness is not None and self._is_better(
@@ -323,14 +325,58 @@ class EvolutionEngine(BaseComponent):
                 self._best_objective = cand.fitness
             artifact_path = self.storage.record_individual(cand, generation=0)
             cand.metadata["artifact_path"] = str(artifact_path)
-            self.population.add(cand)
+            if self.population.add(cand):
+                admitted += 1
             if cand.is_valid:
                 valid += 1
-        self.logger.info(
-            f"Initial population (gen 0): sampled {len(candidates)} | Valid: {valid}/{len(candidates)} "
-            f"| Best: {self._best_objective}"
-        )
-        return len(candidates)
+        return len(candidates), valid, admitted
+
+    def _sample_initial_population(self, size: int) -> int:
+        """Generation 0: LLM-sample the initial population via the mutation
+        strategy's cold-start (empty population -> EoH i1), evaluate, store, and
+        seed the archive. Returns the total number of candidates sampled (incl.
+        failed attempts, which still consumed evaluations).
+
+        Modes:
+          - ensure_init_pop=False (default): one-shot batch of `size`.
+          - ensure_init_pop=True: keep resampling (topping up only the shortfall)
+            until `size` VALID candidates have been admitted, or the attempt
+            budget (ensure_init_pop_max_attempts * size samples) is exhausted.
+            Mirrors LLM4AD EoH's `_iteratively_init_population`.
+        """
+        if not self.engine_cfg.ensure_init_pop:
+            total, valid, _ = self._sample_batch_gen0(size)
+            self.logger.info(
+                f"Initial population (gen 0): sampled {total} | Valid: {valid}/{total} "
+                f"| Best: {self._best_objective}"
+            )
+            return total
+
+        total_sampled = 0
+        max_samples = max(size, self.engine_cfg.ensure_init_pop_max_attempts * size)
+        round_idx = 0
+        stale_rounds = 0
+        while self.population.size() < size and total_sampled < max_samples:
+            shortfall = size - self.population.size()
+            n = min(shortfall, max_samples - total_sampled)
+            sampled, valid, admitted = self._sample_batch_gen0(n)
+            total_sampled += sampled
+            round_idx += 1
+            self.logger.info(
+                f"Initial population (gen 0) round {round_idx}: sampled {sampled}, valid {valid}, "
+                f"admitted {admitted} | pool={self.population.size()}/{size} | total_sampled={total_sampled}"
+            )
+            # Give up early if a round makes no progress (e.g. LLM keeps emitting
+            # duplicates the archive rejects) rather than burning the whole budget.
+            stale_rounds = stale_rounds + 1 if admitted == 0 else 0
+            if sampled == 0 or stale_rounds >= 2:
+                break
+        if self.population.size() < size:
+            self.logger.warning(
+                f"Initial population under-filled: {self.population.size()}/{size} after "
+                f"{total_sampled} samples (stopped: budget or no-progress)."
+            )
+        return total_sampled
 
     def _evaluate_seed(self) -> None:
         """Evaluate baseline initial algorithm as generation 0."""

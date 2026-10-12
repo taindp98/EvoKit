@@ -146,6 +146,23 @@ edit is kept only if it restores parseability.
 
 ---
 
+### EoH flat-at-Best-Fit: compound convergence failure (Phase 28)
+Confirmed via an external diagnosis cross-checked against code + run logs. Chain of causes:
+- **`max_tokens: 512` truncation (primary).** ~90% of candidates ran out of tokens mid-code →
+  syntax errors, or the sanitizer salvaged a function with no `return` → `None` → the
+  "Expected N priority values, but got 1" runtime error. Fixed: configs use `max_tokens: 2048`.
+- **Gen-0 starvation.** Truncation left 2/20 valid at generation 0 (one-shot batch, no retry).
+  Added optional `ensure_init_pop` (default off) to resample until the pool fills.
+- **Parent-pool degeneracy.** With a 2-member pool, every generation queried the LLM with the
+  same 2 parents — a downstream effect of the above, resolved once gen 0 fills.
+- **Strict elitist admission lock.** `LineageGraphArchive.add` used `< worst.fitness`, so with a
+  baseline-filled pool nothing equal/intermediate could ever enter. Fixed: score/code dedup
+  (`dedup_by_score`) + (parents+offspring) survival that admits while below capacity.
+- **Prompt/prose leak.** EoH prompts now match LLM4AD (boxed one-sentence description, implement
+  the function, no extra prose; parent docstrings stripped).
+
+---
+
 ## Known issues / open
 
 - **LLM output extraction is fragile.** `extract_thought` grabs the first `{...}`, which can
